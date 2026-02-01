@@ -33,7 +33,7 @@ export default function DashboardPage() {
   const today = startOfDay(new Date()).toISOString();
   const { data: sales, isLoading: loadingSales } = useSales(shopId);
 
-  const isOwner = user?.role === "owner";
+  const isOwner = user?.role === "superuser" || user?.role === "customer";
 
   if (loadingInventory || loadingSales || !shop) {
     return (

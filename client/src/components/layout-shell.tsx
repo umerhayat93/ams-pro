@@ -80,7 +80,7 @@ export function LayoutShell({ children, shopId }: LayoutShellProps) {
     { icon: FileText, label: "Reports", href: `/shops/${shopId}/reports` },
   ];
 
-  if (user?.role === "owner") {
+  if (user?.role === "superuser") {
     navItems.push({ icon: Settings, label: "Settings", href: `/shops/${shopId}/settings` });
   }
 
@@ -116,7 +116,7 @@ export function LayoutShell({ children, shopId }: LayoutShellProps) {
               <div className="text-xs text-muted-foreground capitalize">{user?.role}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {user?.role === 'owner' && (
+            {user?.role === 'superuser' && (
               <DropdownMenuItem asChild>
                 <Link href="/">
                   <Store className="w-4 h-4 mr-2" />

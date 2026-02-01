@@ -41,7 +41,7 @@ export default function InventoryPage() {
   const shopId = parseInt(params?.id || "0");
   const { user } = useAuth();
   const { toast } = useToast();
-  const isOwner = user?.role === "owner";
+  const isOwner = user?.role === "superuser" || user?.role === "customer";
 
   const { data: inventory, isLoading } = useInventory(shopId);
   const createMutation = useCreateInventory(shopId);

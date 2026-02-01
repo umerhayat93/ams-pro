@@ -6,12 +6,12 @@ import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useCreateSale } from "@/hooks/use-sales";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, ShoppingCart, Trash2, Plus, Minus, UserPlus, Check, Loader2 } from "lucide-react";
+import { Search, ShoppingCart, Plus, Minus, UserPlus, Check, Loader2, Package } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { type InventoryItem, type Customer } from "@shared/schema";
@@ -31,75 +31,84 @@ export default function PosPage() {
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<Map<number, number>>(new Map());
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
   const [isCustomerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerMobile, setNewCustomerMobile] = useState("");
 
-  // Filter inventory
   const filteredInventory = inventory?.filter(item => 
     item.model.toLowerCase().includes(searchQuery.toLowerCase()) || 
     item.brand.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
-  const addToCart = (item: InventoryItem) => {
+  const getQuantity = (itemId: number) => cart.get(itemId) || 0;
+
+  const updateQuantity = (itemId: number, delta: number, maxStock: number) => {
     setCart(prev => {
-      const existing = prev.find(i => i.inventoryItem.id === item.id);
-      if (existing) {
-        if (existing.quantity >= item.quantity) {
-          toast({ title: "Insufficient stock", variant: "destructive" });
-          return prev;
-        }
-        return prev.map(i => i.inventoryItem.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
+      const newCart = new Map(prev);
+      const currentQty = newCart.get(itemId) || 0;
+      const newQty = currentQty + delta;
+      
+      if (newQty <= 0) {
+        newCart.delete(itemId);
+      } else if (newQty > maxStock) {
+        toast({ title: "Insufficient stock", variant: "destructive" });
+        return prev;
+      } else {
+        newCart.set(itemId, newQty);
       }
-      return [...prev, { inventoryItem: item, quantity: 1 }];
+      return newCart;
     });
   };
 
-  const removeFromCart = (itemId: number) => {
-    setCart(prev => prev.filter(i => i.inventoryItem.id !== itemId));
-  };
-
-  const updateQuantity = (itemId: number, delta: number) => {
-    setCart(prev => prev.map(i => {
-      if (i.inventoryItem.id === itemId) {
-        const newQty = i.quantity + delta;
-        if (newQty <= 0) return i;
-        if (newQty > i.inventoryItem.quantity) {
-          toast({ title: "Insufficient stock", variant: "destructive" });
-          return i;
-        }
-        return { ...i, quantity: newQty };
+  const setQuantityDirect = (itemId: number, qty: number, maxStock: number) => {
+    setCart(prev => {
+      const newCart = new Map(prev);
+      if (qty <= 0) {
+        newCart.delete(itemId);
+      } else if (qty > maxStock) {
+        toast({ title: "Insufficient stock", variant: "destructive" });
+        newCart.set(itemId, maxStock);
+      } else {
+        newCart.set(itemId, qty);
       }
-      return i;
-    }));
+      return newCart;
+    });
   };
 
-  const cartTotal = cart.reduce((acc, item) => acc + (Number(item.inventoryItem.sellingPrice) * item.quantity), 0);
+  const cartItems = inventory?.filter(item => cart.has(item.id)) || [];
+  const cartTotal = cartItems.reduce((acc, item) => acc + (Number(item.sellingPrice) * (cart.get(item.id) || 0)), 0);
+  const hasItemsInCart = cart.size > 0;
 
   const handleCheckout = async () => {
     if (!selectedCustomer) {
       toast({ title: "Select a customer first", variant: "destructive" });
       return;
     }
-    if (cart.length === 0) {
-      toast({ title: "Cart is empty", variant: "destructive" });
+    if (!hasItemsInCart) {
+      toast({ title: "Add products to cart first", variant: "destructive" });
       return;
     }
 
     try {
+      const items = Array.from(cart.entries()).map(([inventoryId, quantity]) => {
+        const item = inventory?.find(i => i.id === inventoryId);
+        return {
+          inventoryId,
+          quantity,
+          unitPrice: Number(item?.sellingPrice || 0)
+        };
+      });
+
       const result = await createSale({
         customerId: selectedCustomer.id,
-        items: cart.map(i => ({
-          inventoryId: i.inventoryItem.id,
-          quantity: i.quantity,
-          unitPrice: Number(i.inventoryItem.sellingPrice)
-        }))
+        items
       });
+      
       if (result) {
-        setCart([]);
+        setCart(new Map());
         setSelectedCustomer(null);
       }
     } catch (e) {
@@ -130,11 +139,21 @@ export default function PosPage() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <LayoutShell shopId={shopId}>
+        <div className="flex h-96 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </LayoutShell>
+    );
+  }
+
   return (
     <LayoutShell shopId={shopId}>
       <div className="h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
         
-        {/* Left: Product Grid */}
+        {/* Left: Product List with Quantity Controls */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           <div className="flex gap-4">
             <div className="relative flex-1">
@@ -144,58 +163,101 @@ export default function PosPage() {
                 className="pl-9 h-10"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
+                data-testid="input-search-products"
               />
             </div>
           </div>
 
-          <ScrollArea className="flex-1 rounded-xl border bg-card p-4 shadow-sm">
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredInventory.map(item => (
-                <Card 
-                  key={item.id} 
-                  className={`
-                    cursor-pointer transition-all hover:border-primary hover:shadow-md
-                    ${item.quantity === 0 ? "opacity-50 grayscale pointer-events-none" : ""}
-                  `}
-                  onClick={() => addToCart(item)}
-                >
-                  <CardContent className="p-4 flex flex-col h-full justify-between">
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <Badge variant="outline" className="text-[10px]">{item.brand}</Badge>
-                        <Badge variant={item.quantity < 5 ? "destructive" : "secondary"} className="text-[10px]">
-                          {item.quantity} left
-                        </Badge>
+          <Card className="flex-1 overflow-hidden">
+            <CardHeader className="py-3 px-4 border-b bg-muted/30">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Package className="w-4 h-4" />
+                Select Products & Quantities
+              </CardTitle>
+            </CardHeader>
+            <ScrollArea className="h-[calc(100%-3.5rem)]">
+              <div className="divide-y">
+                {filteredInventory.map(item => {
+                  const qty = getQuantity(item.id);
+                  const isOutOfStock = item.quantity === 0;
+                  
+                  return (
+                    <div 
+                      key={item.id} 
+                      className={`p-4 flex items-center gap-4 ${isOutOfStock ? 'opacity-50 bg-muted/20' : ''} ${qty > 0 ? 'bg-primary/5' : ''}`}
+                      data-testid={`product-row-${item.id}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="outline" className="text-[10px]">{item.brand}</Badge>
+                          <Badge variant={item.quantity < 5 ? "destructive" : "secondary"} className="text-[10px]">
+                            Stock: {item.quantity}
+                          </Badge>
+                        </div>
+                        <h3 className="font-semibold text-sm truncate">{item.model}</h3>
+                        <p className="text-xs text-muted-foreground">{item.storage} • {item.ram} {item.color && `• ${item.color}`}</p>
                       </div>
-                      <h3 className="font-bold text-sm line-clamp-2 mb-1">{item.model}</h3>
-                      <p className="text-xs text-muted-foreground">{item.storage} • {item.ram}</p>
+                      
+                      <div className="text-right mr-4">
+                        <p className="font-bold text-primary">{formatCurrency(Number(item.sellingPrice))}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          size="icon" 
+                          variant="outline" 
+                          className="h-8 w-8 rounded-full"
+                          onClick={() => updateQuantity(item.id, -1, item.quantity)}
+                          disabled={qty === 0 || isOutOfStock}
+                          data-testid={`btn-decrease-${item.id}`}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={item.quantity}
+                          value={qty}
+                          onChange={e => setQuantityDirect(item.id, parseInt(e.target.value) || 0, item.quantity)}
+                          className="w-14 h-8 text-center p-1"
+                          disabled={isOutOfStock}
+                          data-testid={`input-qty-${item.id}`}
+                        />
+                        <Button 
+                          size="icon" 
+                          variant="outline" 
+                          className="h-8 w-8 rounded-full"
+                          onClick={() => updateQuantity(item.id, 1, item.quantity)}
+                          disabled={isOutOfStock || qty >= item.quantity}
+                          data-testid={`btn-increase-${item.id}`}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-3 font-bold text-primary">
-                      {formatCurrency(Number(item.sellingPrice))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-              {filteredInventory.length === 0 && (
-                <div className="col-span-full py-10 text-center text-muted-foreground">
-                  No products found.
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+                  );
+                })}
+                {filteredInventory.length === 0 && (
+                  <div className="py-10 text-center text-muted-foreground">
+                    No products found in inventory.
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </Card>
         </div>
 
-        {/* Right: Cart */}
+        {/* Right: Cart Summary & Checkout */}
         <div className="w-full md:w-96 flex flex-col gap-4 min-h-0 bg-card border rounded-xl shadow-lg shadow-black/5 overflow-hidden">
           
           {/* Customer Selection */}
           <div className="p-4 border-b bg-muted/20 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-lg flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5" /> Current Sale
+                <ShoppingCart className="w-5 h-5" /> Sale Summary
               </h2>
               {selectedCustomer && (
-                <Button variant="ghost" size="sm" onClick={() => setSelectedCustomer(null)} className="h-6 text-xs text-destructive">
+                <Button variant="ghost" size="sm" onClick={() => setSelectedCustomer(null)} className="h-6 text-xs text-destructive" data-testid="btn-clear-customer">
                   Clear
                 </Button>
               )}
@@ -207,14 +269,15 @@ export default function PosPage() {
                   <div className="relative flex-1">
                     <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                     <Input 
-                      placeholder="Find customer..." 
+                      placeholder="Search customer..." 
                       className="h-9 pl-8 text-sm"
                       value={customerSearch}
                       onChange={e => setCustomerSearch(e.target.value)}
+                      data-testid="input-search-customer"
                     />
                     {customerSearch && (
-                      <div className="absolute top-full left-0 right-0 bg-popover border shadow-lg rounded-md mt-1 max-h-40 overflow-auto z-10">
-                        {customers?.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase())).map(c => (
+                      <div className="absolute top-full left-0 right-0 bg-popover border shadow-lg rounded-md mt-1 max-h-40 overflow-auto z-50">
+                        {customers?.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.mobile.includes(customerSearch)).map(c => (
                           <div 
                             key={c.id} 
                             className="p-2 hover:bg-muted text-sm cursor-pointer"
@@ -222,17 +285,21 @@ export default function PosPage() {
                               setSelectedCustomer(c);
                               setCustomerSearch("");
                             }}
+                            data-testid={`customer-option-${c.id}`}
                           >
                             <p className="font-medium">{c.name}</p>
                             <p className="text-xs text-muted-foreground">{c.mobile}</p>
                           </div>
                         ))}
+                        {customers?.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.mobile.includes(customerSearch)).length === 0 && (
+                          <div className="p-2 text-sm text-muted-foreground">No customers found</div>
+                        )}
                       </div>
                     )}
                   </div>
                   <Dialog open={isCustomerDialogOpen} onOpenChange={setCustomerDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
+                      <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" data-testid="btn-add-customer">
                         <UserPlus className="h-4 w-4" />
                       </Button>
                     </DialogTrigger>
@@ -243,15 +310,15 @@ export default function PosPage() {
                       <div className="space-y-4 py-2">
                         <div className="space-y-2">
                           <Label>Name</Label>
-                          <Input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} />
+                          <Input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} data-testid="input-new-customer-name" />
                         </div>
                         <div className="space-y-2">
                           <Label>Mobile</Label>
-                          <Input value={newCustomerMobile} onChange={e => setNewCustomerMobile(e.target.value)} />
+                          <Input value={newCustomerMobile} onChange={e => setNewCustomerMobile(e.target.value)} data-testid="input-new-customer-mobile" />
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button onClick={handleCreateCustomer}>Save Customer</Button>
+                        <Button onClick={handleCreateCustomer} data-testid="btn-save-customer">Save Customer</Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
@@ -270,53 +337,30 @@ export default function PosPage() {
             )}
           </div>
 
-          {/* Cart Items */}
+          {/* Cart Items Summary */}
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-3">
-              {cart.map((item) => (
-                <div key={item.inventoryItem.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
-                  <div className="flex-1">
-                    <p className="font-bold text-sm line-clamp-1">{item.inventoryItem.brand} {item.inventoryItem.model}</p>
-                    <p className="text-xs text-muted-foreground mb-2">{item.inventoryItem.storage}</p>
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        size="icon" 
-                        variant="outline" 
-                        className="h-6 w-6 rounded-full"
-                        onClick={() => updateQuantity(item.inventoryItem.id, -1)}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="text-sm font-medium w-6 text-center">{item.quantity}</span>
-                      <Button 
-                        size="icon" 
-                        variant="outline" 
-                        className="h-6 w-6 rounded-full"
-                        onClick={() => updateQuantity(item.inventoryItem.id, 1)}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
+              {cartItems.map((item) => {
+                const qty = cart.get(item.id) || 0;
+                return (
+                  <div key={item.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
+                    <div className="flex-1">
+                      <p className="font-bold text-sm line-clamp-1">{item.brand} {item.model}</p>
+                      <p className="text-xs text-muted-foreground">{item.storage} × {qty}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-bold text-sm">
+                        {formatCurrency(Number(item.sellingPrice) * qty)}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex flex-col justify-between items-end">
-                    <span className="font-bold text-sm">
-                      {formatCurrency(Number(item.inventoryItem.sellingPrice) * item.quantity)}
-                    </span>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeFromCart(item.inventoryItem.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {cart.length === 0 && (
+                );
+              })}
+              {!hasItemsInCart && (
                 <div className="text-center py-8 text-muted-foreground">
                   <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                  <p>Cart is empty</p>
+                  <p>No items selected</p>
+                  <p className="text-xs mt-1">Set quantity for products on the left</p>
                 </div>
               )}
             </div>
@@ -325,26 +369,27 @@ export default function PosPage() {
           {/* Footer Totals */}
           <div className="p-4 border-t bg-muted/10 space-y-4">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-medium">{formatCurrency(cartTotal)}</span>
+              <span className="text-muted-foreground">Items</span>
+              <span className="font-medium">{cart.size} products</span>
             </div>
             <div className="flex justify-between items-center text-xl font-bold">
               <span>Total</span>
               <span className="text-primary">{formatCurrency(cartTotal)}</span>
             </div>
-            {!selectedCustomer && cart.length > 0 && (
+            {!selectedCustomer && hasItemsInCart && (
               <p className="text-sm text-amber-600 text-center">Select a customer to complete sale</p>
             )}
-            {selectedCustomer && cart.length === 0 && (
-              <p className="text-sm text-amber-600 text-center">Add products to cart to complete sale</p>
+            {selectedCustomer && !hasItemsInCart && (
+              <p className="text-sm text-amber-600 text-center">Set product quantities to complete sale</p>
             )}
             <Button 
               className="w-full h-12 text-lg font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all" 
               onClick={handleCheckout}
-              disabled={isProcessing || cart.length === 0 || !selectedCustomer}
+              disabled={isProcessing || !hasItemsInCart || !selectedCustomer}
+              data-testid="btn-complete-sale"
             >
               {isProcessing && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              {cart.length === 0 ? "Add Products First" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
+              {!hasItemsInCart ? "Select Products" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
             </Button>
           </div>
         </div>

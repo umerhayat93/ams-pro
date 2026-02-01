@@ -1,145 +1,173 @@
-import { pgTable, text, serial, integer, boolean, timestamp, decimal, varchar } from "drizzle-orm/pg-core";
+
+import { pgTable, text, serial, integer, boolean, timestamp, numeric, varchar, jsonb } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// === ENUMS ===
+export const userRoles = ["superuser", "customer"] as const;
+export type UserRole = (typeof userRoles)[number];
+
+// === TABLES ===
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
-  name: text("name").notNull(),
+  role: text("role", { enum: userRoles }).notNull().default("customer"),
+  name: text("name"), // Display name for the user
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const shops = pgTable("shops", {
   id: serial("id").primaryKey(),
-  ownerId: integer("owner_id").notNull(), // Link to users.id
   name: text("name").notNull(),
-  address: text("address"),
-  phone: text("phone"),
-  logo: text("logo"),
+  location: text("location").notNull(), // City / Area
+  address: text("address").notNull(),
+  phone: text("phone").notNull(),
+  ownerId: integer("owner_id").notNull(), // Link to owner user
   createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const categories = pgTable("categories", {
-  id: serial("id").primaryKey(),
-  shopId: integer("shop_id").notNull(),
-  name: text("name").notNull(),
-});
-
-export const products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  shopId: integer("shop_id").notNull(),
-  categoryId: integer("category_id"),
-  name: text("name").notNull(),
-  description: text("description"),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  costPrice: decimal("cost_price", { precision: 10, scale: 2 }), // For profit calculation
-  stock: integer("stock").notNull().default(0),
-  sku: text("sku"),
-  barcode: text("barcode"),
-  image: text("image"),
 });
 
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
   shopId: integer("shop_id").notNull(),
   name: text("name").notNull(),
-  phone: text("phone"),
-  email: text("email"),
+  mobile: text("mobile").notNull(),
   address: text("address"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const orders = pgTable("orders", {
+export const inventory = pgTable("inventory", {
   id: serial("id").primaryKey(),
   shopId: integer("shop_id").notNull(),
-  customerId: integer("customer_id"), // Optional (guest checkout)
-  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  discount: decimal("discount", { precision: 10, scale: 2 }).default("0"),
-  tax: decimal("tax", { precision: 10, scale: 2 }).default("0"),
-  paymentMethod: text("payment_method").notNull(), // cash, card, online
-  status: text("status").notNull().default("completed"), // completed, pending, cancelled
+  brand: text("brand").notNull(), // Apple, Samsung, etc.
+  model: text("model").notNull(), // iPhone 13, etc.
+  storage: text("storage").notNull(), // 128GB, etc.
+  ram: text("ram").notNull(), // 8GB, etc.
+  color: text("color"),
+  quantity: integer("quantity").notNull().default(0),
+  buyingPrice: numeric("buying_price").notNull(), // Visible only to owner
+  sellingPrice: numeric("selling_price").notNull(),
+  lowStockThreshold: integer("low_stock_threshold").default(5),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const sales = pgTable("sales", {
+  id: serial("id").primaryKey(),
+  shopId: integer("shop_id").notNull(),
+  customerId: integer("customer_id").notNull(),
+  invoiceCode: text("invoice_code").notNull(),
+  totalAmount: numeric("total_amount").notNull(),
+  totalProfit: numeric("total_profit").notNull(), // Snapshot for reporting
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const orderItems = pgTable("order_items", {
+export const saleItems = pgTable("sale_items", {
   id: serial("id").primaryKey(),
-  orderId: integer("order_id").notNull(),
-  productId: integer("product_id").notNull(),
+  saleId: integer("sale_id").notNull(),
+  inventoryId: integer("inventory_id").notNull(),
+  brand: text("brand").notNull(), // Snapshot
+  model: text("model").notNull(), // Snapshot
+  variant: text("variant").notNull(), // Snapshot (Storage + RAM)
   quantity: integer("quantity").notNull(),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(), // Price at time of sale
-  costPrice: decimal("cost_price", { precision: 10, scale: 2 }), // Cost at time of sale
-  productName: text("product_name").notNull(), // Snapshot
+  unitPrice: numeric("unit_price").notNull(),
+  costPrice: numeric("cost_price").notNull(), // Snapshot for profit calc
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Relations
-export const usersRelations = relations(users, ({ many }) => ({
-  shops: many(shops),
-}));
+// === RELATIONS ===
 
 export const shopsRelations = relations(shops, ({ one, many }) => ({
   owner: one(users, {
     fields: [shops.ownerId],
     references: [users.id],
   }),
-  products: many(products),
-  categories: many(categories),
+  inventory: many(inventory),
   customers: many(customers),
-  orders: many(orders),
+  sales: many(sales),
+  users: many(users), // Shop users belonging to this shop
 }));
 
-export const productsRelations = relations(products, ({ one }) => ({
+export const usersRelations = relations(users, ({ many }) => ({
+  shops: many(shops), // User can own multiple shops
+}));
+
+export const inventoryRelations = relations(inventory, ({ one }) => ({
   shop: one(shops, {
-    fields: [products.shopId],
+    fields: [inventory.shopId],
     references: [shops.id],
   }),
-  category: one(categories, {
-    fields: [products.categoryId],
-    references: [categories.id],
-  }),
 }));
 
-export const ordersRelations = relations(orders, ({ one, many }) => ({
+export const customersRelations = relations(customers, ({ one, many }) => ({
   shop: one(shops, {
-    fields: [orders.shopId],
+    fields: [customers.shopId],
+    references: [shops.id],
+  }),
+  sales: many(sales),
+}));
+
+export const salesRelations = relations(sales, ({ one, many }) => ({
+  shop: one(shops, {
+    fields: [sales.shopId],
     references: [shops.id],
   }),
   customer: one(customers, {
-    fields: [orders.customerId],
+    fields: [sales.customerId],
     references: [customers.id],
   }),
-  items: many(orderItems),
+  items: many(saleItems),
 }));
 
-export const orderItemsRelations = relations(orderItems, ({ one }) => ({
-  order: one(orders, {
-    fields: [orderItems.orderId],
-    references: [orders.id],
+export const saleItemsRelations = relations(saleItems, ({ one }) => ({
+  sale: one(sales, {
+    fields: [saleItems.saleId],
+    references: [sales.id],
   }),
-  product: one(products, {
-    fields: [orderItems.productId],
-    references: [products.id],
+  inventory: one(inventory, {
+    fields: [saleItems.inventoryId],
+    references: [inventory.id],
   }),
 }));
 
-// Schemas
+// === INSERT SCHEMAS ===
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertShopSchema = createInsertSchema(shops).omit({ id: true, createdAt: true });
-export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
-export const insertProductSchema = createInsertSchema(products).omit({ id: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
-export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true });
-export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
+export const insertInventorySchema = createInsertSchema(inventory).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true, invoiceCode: true, totalProfit: true });
+export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: true, createdAt: true });
 
-// Types
+// === TYPES ===
+
 export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Shop = typeof shops.$inferSelect;
-export type InsertShop = z.infer<typeof insertShopSchema>;
-export type Product = typeof products.$inferSelect;
-export type InsertProduct = z.infer<typeof insertProductSchema>;
-export type Order = typeof orders.$inferSelect;
-export type OrderItem = typeof orderItems.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
+export type InventoryItem = typeof inventory.$inferSelect;
+export type Sale = typeof sales.$inferSelect;
+export type SaleItem = typeof saleItems.$inferSelect;
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type InsertShop = z.infer<typeof insertShopSchema>;
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type InsertInventory = z.infer<typeof insertInventorySchema>;
+export type InsertSale = z.infer<typeof insertSaleSchema>;
+
+// === API SPECIFIC TYPES ===
+
+export type LoginRequest = {
+  username: string;
+  password: string;
+};
+
+export type CreateSaleRequest = {
+  customerId: number;
+  items: {
+    inventoryId: number;
+    quantity: number;
+    unitPrice: number; // In case of override, otherwise default from DB
+  }[];
+};

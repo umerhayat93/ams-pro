@@ -3,26 +3,27 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider, useAuth } from "@/hooks/use-auth";
-import { CartProvider } from "@/hooks/use-cart";
-import { Layout } from "@/components/Layout";
+import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
-// Pages
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import ShopDashboard from "@/pages/ShopDashboard";
-import POS from "@/pages/POS";
-import Inventory from "@/pages/Inventory";
 import NotFound from "@/pages/not-found";
+import LoginPage from "@/pages/login";
+import ShopSelectorPage from "@/pages/shop-selector";
+import DashboardPage from "@/pages/dashboard";
+import PosPage from "@/pages/pos";
+import InventoryPage from "@/pages/inventory";
+import CustomersPage from "@/pages/customers";
+import ReportsPage from "@/pages/reports";
+import SettingsPage from "@/pages/settings";
 
-function ProtectedRoute({ component: Component, ...rest }: any) {
+// Protected Route Wrapper
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="h-screen w-full flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -31,38 +32,53 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
     return <Redirect to="/login" />;
   }
 
-  return (
-    <Layout>
-      <Component {...rest} />
-    </Layout>
-  );
+  // If user is shop_user but tries to access root, redirect to their shop dashboard
+  // This logic could be more robust, but simple for now
+  if (user.role === 'shop_user' && window.location.pathname === '/') {
+    // Assuming shopId is stored in user object or fetched. 
+    // Schema has shopId on user.
+    if (user.shopId) {
+      return <Redirect to={`/shops/${user.shopId}/dashboard`} />;
+    }
+  }
+
+  return <Component />;
 }
 
 function Router() {
   return (
     <Switch>
-      <Route path="/login" component={Login} />
+      <Route path="/login" component={LoginPage} />
       
       {/* Protected Routes */}
       <Route path="/">
-        <ProtectedRoute component={Dashboard} />
+        <ProtectedRoute component={ShopSelectorPage} />
       </Route>
       
-      <Route path="/shop/:id">
-        <ProtectedRoute component={ShopDashboard} />
-      </Route>
-      
-      <Route path="/shop/:id/pos">
-        <CartProvider>
-          <ProtectedRoute component={POS} />
-        </CartProvider>
-      </Route>
-      
-      <Route path="/shop/:id/inventory">
-        <ProtectedRoute component={Inventory} />
+      <Route path="/shops/:id/dashboard">
+        <ProtectedRoute component={DashboardPage} />
       </Route>
 
-      {/* 404 */}
+      <Route path="/shops/:id/pos">
+        <ProtectedRoute component={PosPage} />
+      </Route>
+
+      <Route path="/shops/:id/inventory">
+        <ProtectedRoute component={InventoryPage} />
+      </Route>
+
+      <Route path="/shops/:id/customers">
+        <ProtectedRoute component={CustomersPage} />
+      </Route>
+
+      <Route path="/shops/:id/reports">
+        <ProtectedRoute component={ReportsPage} />
+      </Route>
+
+      <Route path="/shops/:id/settings">
+        <ProtectedRoute component={SettingsPage} />
+      </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
@@ -72,10 +88,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <AuthProvider>
-          <Toaster />
-          <Router />
-        </AuthProvider>
+        <Toaster />
+        <Router />
       </TooltipProvider>
     </QueryClientProvider>
   );

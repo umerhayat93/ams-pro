@@ -1,54 +1,49 @@
+
 import { db } from "./db";
-import { eq, and, desc, sql } from "drizzle-orm";
-import {
-  users, shops, products, categories, customers, orders, orderItems,
-  type User, type InsertUser, type Shop, type InsertShop,
-  type Product, type InsertProduct, type Category, type InsertCategory,
-  type Customer, type InsertCustomer, type Order, type InsertOrder, type OrderItem, type InsertOrderItem
+import { 
+  users, shops, inventory, customers, sales, saleItems,
+  type User, type InsertUser, type Shop, type InsertShop, 
+  type InventoryItem, type InsertInventory, type Customer, type InsertCustomer,
+  type Sale, type InsertSale, type SaleItem
 } from "@shared/schema";
+import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
-  // Users
+  // User & Auth
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  listUsers(): Promise<User[]>;
+  updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
+  deleteUser(id: number): Promise<void>;
+  getAllUsers(): Promise<User[]>;
 
   // Shops
-  getShopsByOwner(ownerId: number): Promise<Shop[]>;
-  getShop(id: number): Promise<Shop | undefined>;
   createShop(shop: InsertShop): Promise<Shop>;
-  updateShop(id: number, shop: Partial<InsertShop>): Promise<Shop>;
+  getShopsByOwner(ownerId: number): Promise<Shop[]>;
+  getAllShops(): Promise<Shop[]>;
+  getShop(id: number): Promise<Shop | undefined>;
+  updateShop(id: number, updates: Partial<InsertShop>): Promise<Shop>;
+  deleteShop(id: number): Promise<void>;
 
-  // Products
-  getProducts(shopId: number): Promise<Product[]>;
-  getProduct(id: number): Promise<Product | undefined>;
-  createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product>;
-  deleteProduct(id: number): Promise<void>;
-
-  // Categories
-  getCategories(shopId: number): Promise<Category[]>;
-  createCategory(category: InsertCategory): Promise<Category>;
-
+  // Inventory
+  getInventory(shopId: number): Promise<InventoryItem[]>;
+  getInventoryItem(id: number): Promise<InventoryItem | undefined>;
+  createInventoryItem(item: InsertInventory): Promise<InventoryItem>;
+  updateInventoryItem(id: number, updates: Partial<InsertInventory>): Promise<InventoryItem>;
+  deleteInventoryItem(id: number): Promise<void>;
+  
   // Customers
   getCustomers(shopId: number): Promise<Customer[]>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
+  searchCustomers(shopId: number, query: string): Promise<Customer[]>;
 
-  // Orders
-  createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order>;
-  getOrders(shopId: number): Promise<(Order & { items: OrderItem[] })[]>;
-  
-  // Reports
-  getShopStats(shopId: number): Promise<{
-    todaySales: number;
-    monthSales: number;
-    totalOrders: number;
-    lowStock: number;
-  }>;
+  // Sales
+  createSale(sale: InsertSale, items: { inventoryId: number, quantity: number, unitPrice: number, costPrice: number, brand: string, model: string, variant: string }[]): Promise<Sale>;
+  getSales(shopId: number, startDate?: Date, endDate?: Date): Promise<(Sale & { customer: Customer, items: SaleItem[] })[]>;
 }
 
 export class DatabaseStorage implements IStorage {
+  // === Users ===
   async getUser(id: number): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -59,13 +54,28 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+  async createUser(user: InsertUser): Promise<User> {
+    const [newUser] = await db.insert(users).values(user).returning();
+    return newUser;
+  }
+  
+  async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
+    const [updatedUser] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return updatedUser;
   }
 
-  async listUsers(): Promise<User[]> {
+  async deleteUser(id: number): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getAllUsers(): Promise<User[]> {
     return await db.select().from(users);
+  }
+
+  // === Shops ===
+  async createShop(shop: InsertShop): Promise<Shop> {
+    const [newShop] = await db.insert(shops).values(shop).returning();
+    return newShop;
   }
 
   async getShopsByOwner(ownerId: number): Promise<Shop[]> {
@@ -77,126 +87,111 @@ export class DatabaseStorage implements IStorage {
     return shop;
   }
 
-  async createShop(insertShop: InsertShop): Promise<Shop> {
-    const [shop] = await db.insert(shops).values(insertShop).returning();
-    return shop;
+  async updateShop(id: number, updates: Partial<InsertShop>): Promise<Shop> {
+    const [updatedShop] = await db.update(shops).set(updates).where(eq(shops.id, id)).returning();
+    return updatedShop;
   }
 
-  async updateShop(id: number, update: Partial<InsertShop>): Promise<Shop> {
-    const [shop] = await db.update(shops).set(update).where(eq(shops.id, id)).returning();
-    return shop;
+  async deleteShop(id: number): Promise<void> {
+    await db.delete(shops).where(eq(shops.id, id));
   }
 
-  async getProducts(shopId: number): Promise<Product[]> {
-    return await db.select().from(products).where(eq(products.shopId, shopId));
+  async getAllShops(): Promise<Shop[]> {
+    return await db.select().from(shops);
   }
 
-  async getProduct(id: number): Promise<Product | undefined> {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
-    return product;
+  // === Inventory ===
+  async getInventory(shopId: number): Promise<InventoryItem[]> {
+    return await db.select().from(inventory).where(eq(inventory.shopId, shopId)).orderBy(desc(inventory.createdAt));
   }
 
-  async createProduct(insertProduct: InsertProduct): Promise<Product> {
-    const [product] = await db.insert(products).values(insertProduct).returning();
-    return product;
+  async getInventoryItem(id: number): Promise<InventoryItem | undefined> {
+    const [item] = await db.select().from(inventory).where(eq(inventory.id, id));
+    return item;
   }
 
-  async updateProduct(id: number, update: Partial<InsertProduct>): Promise<Product> {
-    const [product] = await db.update(products).set(update).where(eq(products.id, id)).returning();
-    return product;
+  async createInventoryItem(item: InsertInventory): Promise<InventoryItem> {
+    const [newItem] = await db.insert(inventory).values(item).returning();
+    return newItem;
   }
 
-  async deleteProduct(id: number): Promise<void> {
-    await db.delete(products).where(eq(products.id, id));
+  async updateInventoryItem(id: number, updates: Partial<InsertInventory>): Promise<InventoryItem> {
+    const [updatedItem] = await db.update(inventory).set({ ...updates, updatedAt: new Date() }).where(eq(inventory.id, id)).returning();
+    return updatedItem;
   }
 
-  async getCategories(shopId: number): Promise<Category[]> {
-    return await db.select().from(categories).where(eq(categories.shopId, shopId));
+  async deleteInventoryItem(id: number): Promise<void> {
+    await db.delete(inventory).where(eq(inventory.id, id));
   }
 
-  async createCategory(insertCategory: InsertCategory): Promise<Category> {
-    const [category] = await db.insert(categories).values(insertCategory).returning();
-    return category;
-  }
-
+  // === Customers ===
   async getCustomers(shopId: number): Promise<Customer[]> {
     return await db.select().from(customers).where(eq(customers.shopId, shopId));
   }
 
-  async createCustomer(insertCustomer: InsertCustomer): Promise<Customer> {
-    const [customer] = await db.insert(customers).values(insertCustomer).returning();
-    return customer;
+  async createCustomer(customer: InsertCustomer): Promise<Customer> {
+    const [newCustomer] = await db.insert(customers).values(customer).returning();
+    return newCustomer;
   }
 
-  async createOrder(insertOrder: InsertOrder, items: InsertOrderItem[]): Promise<Order> {
-    // Transaction to ensure order and items are created together and stock is updated
+  async searchCustomers(shopId: number, query: string): Promise<Customer[]> {
+    return await db.select().from(customers)
+      .where(and(
+        eq(customers.shopId, shopId),
+        sql`name ILIKE ${`%${query}%`} OR mobile ILIKE ${`%${query}%`}`
+      ))
+      .limit(10);
+  }
+
+  // === Sales ===
+  async createSale(
+    saleData: InsertSale, 
+    itemsData: { inventoryId: number, quantity: number, unitPrice: number, costPrice: number, brand: string, model: string, variant: string }[]
+  ): Promise<Sale> {
     return await db.transaction(async (tx) => {
-      const [order] = await tx.insert(orders).values(insertOrder).returning();
-      
-      for (const item of items) {
-        await tx.insert(orderItems).values({ ...item, orderId: order.id });
-        
-        // Decrease stock
-        // Note: In a real app, check for negative stock
-        await tx.execute(
-          sql`UPDATE products SET stock = stock - ${item.quantity} WHERE id = ${item.productId}`
-        );
+      // 1. Create Sale Record
+      const [newSale] = await tx.insert(sales).values(saleData).returning();
+
+      // 2. Create Sale Items and Update Inventory
+      for (const item of itemsData) {
+        await tx.insert(saleItems).values({
+          saleId: newSale.id,
+          inventoryId: item.inventoryId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice.toString(),
+          costPrice: item.costPrice.toString(),
+          brand: item.brand,
+          model: item.model,
+          variant: item.variant,
+        });
+
+        // Decrement stock
+        await tx.update(inventory)
+          .set({ quantity: sql`quantity - ${item.quantity}` })
+          .where(eq(inventory.id, item.inventoryId));
       }
-      
-      return order;
+
+      return newSale;
     });
   }
 
-  async getOrders(shopId: number): Promise<(Order & { items: OrderItem[] })[]> {
-    const shopOrders = await db.select().from(orders).where(eq(orders.shopId, shopId)).orderBy(desc(orders.createdAt));
+  async getSales(shopId: number, startDate?: Date, endDate?: Date): Promise<(Sale & { customer: Customer, items: SaleItem[] })[]> {
+    let whereClause = eq(sales.shopId, shopId);
     
-    // This is N+1, but for simplicity in this MVP it's okay. Drizzle's `query` builder is better for this but I'm using core here.
-    // Or I can fetch all items for these orders.
-    const result = [];
-    for (const order of shopOrders) {
-      const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-      result.push({ ...order, items });
+    if (startDate && endDate) {
+      whereClause = and(whereClause, gte(sales.createdAt, startDate), lte(sales.createdAt, endDate));
     }
-    return result;
-  }
 
-  async getShopStats(shopId: number): Promise<{ todaySales: number; monthSales: number; totalOrders: number; lowStock: number }> {
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const rows = await db.query.sales.findMany({
+      where: whereClause,
+      with: {
+        customer: true,
+        items: true,
+      },
+      orderBy: [desc(sales.createdAt)],
+    });
 
-    // Sales Today
-    const todayOrders = await db.select().from(orders)
-      .where(and(
-        eq(orders.shopId, shopId),
-        sql`${orders.createdAt} >= ${startOfDay}`
-      ));
-    const todaySales = todayOrders.reduce((sum, order) => sum + Number(order.totalAmount), 0);
-
-    // Sales Month
-    const monthOrders = await db.select().from(orders)
-      .where(and(
-        eq(orders.shopId, shopId),
-        sql`${orders.createdAt} >= ${startOfMonth}`
-      ));
-    const monthSales = monthOrders.reduce((sum, order) => sum + Number(order.totalAmount), 0);
-
-    // Total Orders
-    const allOrdersCount = await db.select({ count: sql<number>`count(*)` }).from(orders).where(eq(orders.shopId, shopId));
-    
-    // Low Stock (< 5)
-    const lowStockCount = await db.select({ count: sql<number>`count(*)` }).from(products)
-      .where(and(
-        eq(products.shopId, shopId),
-        sql`stock < 5`
-      ));
-
-    return {
-      todaySales,
-      monthSales,
-      totalOrders: Number(allOrdersCount[0]?.count || 0),
-      lowStock: Number(lowStockCount[0]?.count || 0),
-    };
+    return rows;
   }
 }
 

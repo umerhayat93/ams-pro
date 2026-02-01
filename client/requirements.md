@@ -1,12 +1,11 @@
 ## Packages
-recharts | For dashboard analytics and sales charts
-jspdf | For generating PDF reports
-jspdf-autotable | Table plugin for PDF generation
-framer-motion | Smooth animations for UI transitions and entry effects
+recharts | For dashboard analytics charts and data visualization
+framer-motion | For smooth page transitions and micro-interactions
+date-fns | For date formatting in tables and reports
 
 ## Notes
-Auth uses cookie-based sessions with /api/auth/me
-PDF generation runs client-side using jspdf
-Icons provided by lucide-react (already in stack)
-UI components use shadcn/ui pattern (already in stack)
-POS Cart state is managed via React Context
+Tailwind Config - extend fontFamily:
+fontFamily: {
+  display: ["'Outfit', sans-serif"],
+  body: ["'DM Sans', sans-serif"],
+}

@@ -1,45 +1,47 @@
+
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express } from "express";
 import session from "express-session";
-import createMemoryStore from "memorystore";
-const MemoryStore = createMemoryStore(session);
-import { scrypt, randomBytes, timingSafeEqual } from "crypto";
-import { promisify } from "util";
 import { storage } from "./storage";
 import { User } from "@shared/schema";
+import { scrypt, randomBytes, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+import { createRequire } from "module";
 
+const require = createRequire(import.meta.url);
 const scryptAsync = promisify(scrypt);
 
-// For MVP, we'll just compare strings if not hashed, or implement hashing.
-// Since we are seeding with plain text "rehan055", let's handle both for now or just plain text for simplicity
-// given the explicit credentials provided by user. 
-// Ideally:
-// async function hashPassword(password: string) { ... }
-// async function comparePassword(supplied: string, stored: string) { ... }
+async function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${buf.toString("hex")}.${salt}`;
+}
 
-// But to ensure "rehan055" works immediately without me manually hashing it first:
-// I will compare plain text. 
-// SECURITY WARNING: In a real production app, ALWAYS hash passwords.
-function comparePassword(supplied: string, stored: string) {
-  return supplied === stored;
+async function comparePasswords(supplied: string, stored: string) {
+  const [hashed, salt] = stored.split(".");
+  const hashedPasswordBuf = Buffer.from(hashed, "hex");
+  const suppliedPasswordBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
+  return timingSafeEqual(hashedPasswordBuf, suppliedPasswordBuf);
 }
 
 export function setupAuth(app: Express) {
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "r3pl1t_s3cr3t_k3y",
+    secret: process.env.SESSION_SECRET || "r3pl1t_sup3r_s3cr3t_k3y",
     resave: false,
     saveUninitialized: false,
-    store: new MemoryStore({
-      checkPeriod: 86400000,
+    store: new (require("connect-pg-simple")(session))({
+      createTableIfMissing: true,
     }),
     cookie: {
-        secure: app.get("env") === "production",
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     }
   };
 
-  app.set("trust proxy", 1);
+  if (app.get("env") === "production") {
+    app.set("trust proxy", 1);
+  }
+
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
@@ -48,9 +50,23 @@ export function setupAuth(app: Express) {
     new LocalStrategy(async (username, password, done) => {
       try {
         const user = await storage.getUserByUsername(username);
-        if (!user || !comparePassword(password, user.password)) {
-          return done(null, false, { message: "Invalid username or password" });
+        if (!user) {
+          return done(null, false, { message: "Invalid username" });
         }
+        
+        // In a real app we hash, but for the seed data provided in prompt
+        // we might need to handle plain text first or hash it immediately.
+        // Assuming we will seed with hashed password or hash on create.
+        
+        // Let's assume stored password is hashed.
+        // If the seed password is plain text (rehan055), we need to ensure 
+        // the seed process hashes it.
+        
+        const isValid = await comparePasswords(password, user.password);
+        if (!isValid) {
+          return done(null, false, { message: "Invalid password" });
+        }
+        
         return done(null, user);
       } catch (err) {
         return done(err);
@@ -62,9 +78,9 @@ export function setupAuth(app: Express) {
     done(null, (user as User).id);
   });
 
-  passport.deserializeUser(async (id, done) => {
+  passport.deserializeUser(async (id: number, done) => {
     try {
-      const user = await storage.getUser(id as number);
+      const user = await storage.getUser(id);
       done(null, user);
     } catch (err) {
       done(err);
@@ -72,11 +88,9 @@ export function setupAuth(app: Express) {
   });
 
   app.post("/api/login", (req, res, next) => {
-    passport.authenticate("local", (err, user, info) => {
+    passport.authenticate("local", (err: any, user: User, info: any) => {
       if (err) return next(err);
-      if (!user) {
-        return res.status(401).json({ message: info?.message || "Authentication failed" });
-      }
+      if (!user) return res.status(401).json({ message: "Invalid credentials" });
       req.login(user, (err) => {
         if (err) return next(err);
         res.status(200).json(user);
@@ -87,7 +101,7 @@ export function setupAuth(app: Express) {
   app.post("/api/logout", (req, res, next) => {
     req.logout((err) => {
       if (err) return next(err);
-      res.sendStatus(200);
+      res.status(200).json({ message: "Logged out successfully" });
     });
   });
 
@@ -95,7 +109,10 @@ export function setupAuth(app: Express) {
     if (req.isAuthenticated()) {
       res.json(req.user);
     } else {
-      res.json(null);
+      res.status(401).json({ message: "Not authenticated" });
     }
   });
 }
+
+// Export hashing utils for seeding
+export const authUtils = { hashPassword };

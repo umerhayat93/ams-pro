@@ -1,16 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import { type InsertCustomer, type Customer } from "@shared/schema";
+import { type InsertCustomer } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
-export function useCustomers(shopId: number) {
+export function useCustomers(shopId: number, search?: string) {
   return useQuery({
-    queryKey: [api.customers.list.path, shopId],
+    queryKey: [api.customers.list.path, shopId, search],
     queryFn: async () => {
-      const url = buildUrl(api.customers.list.path, { shopId });
-      const res = await fetch(url);
+      if (!shopId) return [];
+      const queryParams = search ? `?search=${encodeURIComponent(search)}` : "";
+      const url = buildUrl(api.customers.list.path, { shopId }) + queryParams;
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch customers");
-      return await res.json() as Customer[];
+      return api.customers.list.responses[200].parse(await res.json());
     },
     enabled: !!shopId,
   });
@@ -27,16 +29,21 @@ export function useCreateCustomer(shopId: number) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to create customer");
-      return await res.json() as Customer;
+      return api.customers.create.responses[201].parse(await res.json());
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.customers.list.path, shopId] });
-      toast({ title: "Success", description: "Customer created successfully" });
+      toast({ title: "Customer created" });
     },
-    onError: (err) => {
-      toast({ variant: "destructive", title: "Error", description: err.message });
+    onError: (error: Error) => {
+      toast({
+        title: "Error creating customer",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 }

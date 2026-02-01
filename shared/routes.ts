@@ -1,5 +1,32 @@
+
 import { z } from "zod";
-import { insertUserSchema, insertShopSchema, insertProductSchema, insertCategorySchema, insertCustomerSchema, insertOrderSchema } from "./schema";
+import { 
+  insertUserSchema, 
+  insertShopSchema, 
+  insertCustomerSchema, 
+  insertInventorySchema,
+  inventory,
+  shops,
+  customers,
+  sales,
+  users
+} from "./schema";
+
+export const errorSchemas = {
+  validation: z.object({
+    message: z.string(),
+    field: z.string().optional(),
+  }),
+  notFound: z.object({
+    message: z.string(),
+  }),
+  unauthorized: z.object({
+    message: z.string(),
+  }),
+  forbidden: z.object({
+    message: z.string(),
+  }),
+};
 
 export const api = {
   auth: {
@@ -11,8 +38,8 @@ export const api = {
         password: z.string(),
       }),
       responses: {
-        200: insertUserSchema, // Returns user object
-        401: z.object({ message: z.string() }),
+        200: z.custom<typeof users.$inferSelect>(),
+        401: errorSchemas.unauthorized,
       },
     },
     logout: {
@@ -26,34 +53,36 @@ export const api = {
       method: "GET" as const,
       path: "/api/user",
       responses: {
-        200: insertUserSchema.nullable(),
+        200: z.custom<typeof users.$inferSelect>(),
+        401: errorSchemas.unauthorized,
       },
     },
   },
-  users: {
-    create: {
+  admin: {
+    createUser: {
       method: "POST" as const,
-      path: "/api/users",
+      path: "/api/admin/users",
       input: insertUserSchema,
       responses: {
-        201: insertUserSchema,
-        400: z.object({ message: z.string() }),
+        201: z.custom<typeof users.$inferSelect>(),
+        403: errorSchemas.forbidden,
       },
     },
-    list: { // Admin only
+    getUsers: {
       method: "GET" as const,
-      path: "/api/users",
+      path: "/api/admin/users",
       responses: {
-        200: z.array(insertUserSchema),
+        200: z.array(z.custom<typeof users.$inferSelect>()),
+        403: errorSchemas.forbidden,
       },
-    },
+    }
   },
   shops: {
     list: {
       method: "GET" as const,
       path: "/api/shops",
       responses: {
-        200: z.array(insertShopSchema.extend({ id: z.number() })),
+        200: z.array(z.custom<typeof shops.$inferSelect>()),
       },
     },
     create: {
@@ -61,64 +90,62 @@ export const api = {
       path: "/api/shops",
       input: insertShopSchema,
       responses: {
-        201: insertShopSchema.extend({ id: z.number() }),
+        201: z.custom<typeof shops.$inferSelect>(),
+        403: errorSchemas.forbidden,
       },
     },
     get: {
       method: "GET" as const,
       path: "/api/shops/:id",
       responses: {
-        200: insertShopSchema.extend({ id: z.number() }),
-        404: z.object({ message: z.string() }),
+        200: z.custom<typeof shops.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    update: {
+      method: "PUT" as const,
+      path: "/api/shops/:id",
+      input: insertShopSchema.partial(),
+      responses: {
+        200: z.custom<typeof shops.$inferSelect>(),
+        403: errorSchemas.forbidden,
       },
     },
   },
-  products: {
+  inventory: {
     list: {
       method: "GET" as const,
-      path: "/api/shops/:shopId/products",
+      path: "/api/shops/:shopId/inventory",
+      input: z.object({
+        lowStock: z.boolean().optional(),
+        brand: z.string().optional(),
+        search: z.string().optional(),
+      }).optional(),
       responses: {
-        200: z.array(insertProductSchema.extend({ id: z.number() })),
+        200: z.array(z.custom<typeof inventory.$inferSelect>()),
       },
     },
     create: {
       method: "POST" as const,
-      path: "/api/shops/:shopId/products",
-      input: insertProductSchema,
+      path: "/api/shops/:shopId/inventory",
+      input: insertInventorySchema,
       responses: {
-        201: insertProductSchema.extend({ id: z.number() }),
+        201: z.custom<typeof inventory.$inferSelect>(),
       },
     },
     update: {
-      method: "PATCH" as const,
-      path: "/api/products/:id",
-      input: insertProductSchema.partial(),
+      method: "PUT" as const,
+      path: "/api/inventory/:id",
+      input: insertInventorySchema.partial(),
       responses: {
-        200: insertProductSchema.extend({ id: z.number() }),
+        200: z.custom<typeof inventory.$inferSelect>(),
       },
     },
     delete: {
       method: "DELETE" as const,
-      path: "/api/products/:id",
+      path: "/api/inventory/:id",
       responses: {
-        200: z.void(),
-      },
-    },
-  },
-  categories: {
-    list: {
-      method: "GET" as const,
-      path: "/api/shops/:shopId/categories",
-      responses: {
-        200: z.array(insertCategorySchema.extend({ id: z.number() })),
-      },
-    },
-    create: {
-      method: "POST" as const,
-      path: "/api/shops/:shopId/categories",
-      input: insertCategorySchema,
-      responses: {
-        201: insertCategorySchema.extend({ id: z.number() }),
+        204: z.void(),
       },
     },
   },
@@ -126,8 +153,11 @@ export const api = {
     list: {
       method: "GET" as const,
       path: "/api/shops/:shopId/customers",
+      input: z.object({
+        search: z.string().optional(),
+      }).optional(),
       responses: {
-        200: z.array(insertCustomerSchema.extend({ id: z.number() })),
+        200: z.array(z.custom<typeof customers.$inferSelect>()),
       },
     },
     create: {
@@ -135,47 +165,49 @@ export const api = {
       path: "/api/shops/:shopId/customers",
       input: insertCustomerSchema,
       responses: {
-        201: insertCustomerSchema.extend({ id: z.number() }),
+        201: z.custom<typeof customers.$inferSelect>(),
       },
     },
   },
-  orders: {
+  sales: {
     create: {
       method: "POST" as const,
-      path: "/api/shops/:shopId/orders",
+      path: "/api/shops/:shopId/sales",
       input: z.object({
-        customerId: z.number().optional(),
-        paymentMethod: z.string(),
-        discount: z.number().optional(),
-        tax: z.number().optional(),
+        customerId: z.number(),
         items: z.array(z.object({
-          productId: z.number(),
+          inventoryId: z.number(),
           quantity: z.number(),
+          unitPrice: z.number(),
         })),
       }),
       responses: {
-        201: insertOrderSchema.extend({ id: z.number() }),
+        201: z.custom<typeof sales.$inferSelect & { items: any[] }>(),
       },
     },
     list: {
       method: "GET" as const,
-      path: "/api/shops/:shopId/orders",
+      path: "/api/shops/:shopId/sales",
+      input: z.object({
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }).optional(),
       responses: {
-        200: z.array(insertOrderSchema.extend({ id: z.number(), items: z.array(z.any()) })),
+        200: z.array(z.custom<typeof sales.$inferSelect & { customer: typeof customers.$inferSelect, items: any[] }>()),
       },
     },
   },
   reports: {
-    summary: {
+    get: {
       method: "GET" as const,
-      path: "/api/shops/:shopId/reports/summary",
+      path: "/api/shops/:shopId/reports",
+      input: z.object({
+        type: z.enum(["owner", "customer"]),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }),
       responses: {
-        200: z.object({
-          todaySales: z.number(),
-          monthSales: z.number(),
-          totalOrders: z.number(),
-          lowStock: z.number(),
-        }),
+        200: z.any(), // Flexible report data structure
       },
     },
   },

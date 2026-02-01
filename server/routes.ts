@@ -137,19 +137,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // === Inventory ===
   app.get(api.inventory.list.path, async (req, res) => {
     if (!req.isAuthenticated()) return res.status(401).send("Unauthorized");
-    const inventory = await storage.getInventory(Number(req.params.shopId));
+    const inventoryItems = await storage.getInventory(Number(req.params.shopId));
     
-    // Filter if needed (handled in storage or here)
-    // Low stock filter etc.
-    
-    // Hide buying price for non-superusers (customers see their own cost prices)
-    if (req.user!.role !== "superuser") {
-      inventory.forEach((item: any) => {
-        delete item.buyingPrice;
-      });
-    }
-    
-    res.json(inventory);
+    // Both superusers and customers (shop owners) can see buying prices
+    res.json(inventoryItems);
   });
 
   app.post(api.inventory.create.path, async (req, res) => {
@@ -259,19 +250,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
     const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
 
-    const sales = await storage.getSales(Number(req.params.shopId), startDate, endDate);
+    const salesData = await storage.getSales(Number(req.params.shopId), startDate, endDate);
     
-    // Hide profit fields for non-superusers
-    if (req.user!.role !== "superuser") {
-      sales.forEach((sale: any) => {
-        delete sale.totalProfit;
-        sale.items.forEach((item: any) => {
-          delete item.costPrice;
-        });
-      });
-    }
-    
-    res.json(sales);
+    // Both superusers and customers (shop owners) can see profit data
+    res.json(salesData);
   });
 
   return httpServer;

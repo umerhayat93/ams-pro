@@ -145,12 +145,12 @@ export class DatabaseStorage implements IStorage {
 
   // === Sales ===
   async createSale(
-    saleData: InsertSale, 
+    saleData: any, 
     itemsData: { inventoryId: number, quantity: number, unitPrice: number, costPrice: number, brand: string, model: string, variant: string }[]
   ): Promise<Sale> {
     return await db.transaction(async (tx) => {
       // 1. Create Sale Record
-      const [newSale] = await tx.insert(sales).values(saleData).returning();
+      const [newSale] = await tx.insert(sales).values(saleData as any).returning();
 
       // 2. Create Sale Items and Update Inventory
       for (const item of itemsData) {
@@ -176,7 +176,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSales(shopId: number, startDate?: Date, endDate?: Date): Promise<(Sale & { customer: Customer, items: SaleItem[] })[]> {
-    let whereClause = eq(sales.shopId, shopId);
+    let whereClause: any = eq(sales.shopId, shopId);
     
     if (startDate && endDate) {
       whereClause = and(whereClause, gte(sales.createdAt, startDate), lte(sales.createdAt, endDate));
@@ -191,7 +191,7 @@ export class DatabaseStorage implements IStorage {
       orderBy: [desc(sales.createdAt)],
     });
 
-    return rows;
+    return rows as any;
   }
 }
 

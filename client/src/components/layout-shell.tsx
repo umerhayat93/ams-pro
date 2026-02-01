@@ -116,14 +116,12 @@ export function LayoutShell({ children, shopId }: LayoutShellProps) {
               <div className="text-xs text-muted-foreground capitalize">{user?.role}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {user?.role === 'superuser' && (
-              <DropdownMenuItem asChild>
-                <Link href="/">
-                  <Store className="w-4 h-4 mr-2" />
-                  Switch Shop
-                </Link>
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem asChild>
+              <Link href="/">
+                <Store className="w-4 h-4 mr-2" />
+                Switch Shop
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => logout()} className="text-destructive">
               <LogOut className="w-4 h-4 mr-2" />
               Sign out

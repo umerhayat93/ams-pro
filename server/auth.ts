@@ -67,6 +67,11 @@ export function setupAuth(app: Express) {
           return done(null, false, { message: "Invalid password" });
         }
         
+        // Check if user is banned
+        if (user.banned) {
+          return done(null, false, { message: "Account is banned. Contact administrator." });
+        }
+        
         return done(null, user);
       } catch (err) {
         return done(err);

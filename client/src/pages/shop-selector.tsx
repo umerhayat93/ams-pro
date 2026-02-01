@@ -3,8 +3,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { LayoutShell } from "@/components/layout-shell";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Store, ArrowRight, MapPin, Phone, Loader2 } from "lucide-react";
-import { Link } from "wouter";
+import { Plus, Store, ArrowRight, MapPin, Phone, Loader2, Shield } from "lucide-react";
+import { Link, Redirect } from "wouter";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,11 @@ export default function ShopSelectorPage() {
     form.reset();
   }
 
+  // Superuser should go to admin panel
+  if (user?.role === "superuser") {
+    return <Redirect to="/admin" />;
+  }
+
   if (isLoading) {
     return (
       <LayoutShell>
@@ -53,9 +58,6 @@ export default function ShopSelectorPage() {
     );
   }
 
-  // If user is a shop_user, they might have a direct shopId assigned. 
-  // Redirect logic should happen in App.tsx or useAuth redirection, but here we list available shops.
-
   return (
     <LayoutShell>
       <div className="max-w-5xl mx-auto space-y-8">
@@ -65,7 +67,7 @@ export default function ShopSelectorPage() {
             <p className="text-muted-foreground mt-1">Manage your inventory and sales by selecting a shop below.</p>
           </div>
           
-          {user?.role === "owner" && (
+          {user?.role === "customer" && (
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button className="h-11 px-6 rounded-xl shadow-lg shadow-primary/20">

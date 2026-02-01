@@ -15,8 +15,8 @@ import InventoryPage from "@/pages/inventory";
 import CustomersPage from "@/pages/customers";
 import ReportsPage from "@/pages/reports";
 import SettingsPage from "@/pages/settings";
+import AdminPage from "@/pages/admin";
 
-// Protected Route Wrapper
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
 
@@ -32,14 +32,26 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
     return <Redirect to="/login" />;
   }
 
-  // If user is shop_user but tries to access root, redirect to their shop dashboard
-  // This logic could be more robust, but simple for now
-  if (user.role === 'shop_user' && window.location.pathname === '/') {
-    // Assuming shopId is stored in user object or fetched. 
-    // Schema has shopId on user.
-    if (user.shopId) {
-      return <Redirect to={`/shops/${user.shopId}/dashboard`} />;
-    }
+  return <Component />;
+}
+
+function SuperuserRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Redirect to="/login" />;
+  }
+
+  if (user.role !== "superuser") {
+    return <Redirect to="/" />;
   }
 
   return <Component />;
@@ -50,7 +62,10 @@ function Router() {
     <Switch>
       <Route path="/login" component={LoginPage} />
       
-      {/* Protected Routes */}
+      <Route path="/admin">
+        <SuperuserRoute component={AdminPage} />
+      </Route>
+      
       <Route path="/">
         <ProtectedRoute component={ShopSelectorPage} />
       </Route>

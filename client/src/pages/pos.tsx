@@ -90,7 +90,7 @@ export default function PosPage() {
     }
 
     try {
-      await createSale({
+      const result = await createSale({
         customerId: selectedCustomer.id,
         items: cart.map(i => ({
           inventoryId: i.inventoryItem.id,
@@ -98,27 +98,35 @@ export default function PosPage() {
           unitPrice: Number(i.inventoryItem.sellingPrice)
         }))
       });
-      setCart([]);
-      setSelectedCustomer(null);
+      if (result) {
+        setCart([]);
+        setSelectedCustomer(null);
+      }
     } catch (e) {
-      // handled in hook
+      console.error("Sale failed:", e);
     }
   };
 
   const handleCreateCustomer = async () => {
-    if (!newCustomerName || !newCustomerMobile) return;
+    if (!newCustomerName || !newCustomerMobile) {
+      toast({ title: "Please enter name and mobile", variant: "destructive" });
+      return;
+    }
     try {
       const customer = await createCustomer({
         name: newCustomerName,
         mobile: newCustomerMobile,
         shopId
       });
-      setSelectedCustomer(customer);
-      setCustomerDialogOpen(false);
-      setNewCustomerName("");
-      setNewCustomerMobile("");
+      if (customer) {
+        setSelectedCustomer(customer);
+        setCustomerDialogOpen(false);
+        setNewCustomerName("");
+        setNewCustomerMobile("");
+        toast({ title: "Customer added to sale" });
+      }
     } catch (e) {
-      // handled
+      console.error("Failed to create customer:", e);
     }
   };
 
@@ -324,13 +332,19 @@ export default function PosPage() {
               <span>Total</span>
               <span className="text-primary">{formatCurrency(cartTotal)}</span>
             </div>
+            {!selectedCustomer && cart.length > 0 && (
+              <p className="text-sm text-amber-600 text-center">Select a customer to complete sale</p>
+            )}
+            {selectedCustomer && cart.length === 0 && (
+              <p className="text-sm text-amber-600 text-center">Add products to cart to complete sale</p>
+            )}
             <Button 
               className="w-full h-12 text-lg font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all" 
               onClick={handleCheckout}
               disabled={isProcessing || cart.length === 0 || !selectedCustomer}
             >
               {isProcessing && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              Complete Sale
+              {cart.length === 0 ? "Add Products First" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
             </Button>
           </div>
         </div>

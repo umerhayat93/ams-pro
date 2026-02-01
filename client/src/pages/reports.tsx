@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Loader2, FileText, Download, Printer, TrendingUp, DollarSign, FilePdf, CalendarDays } from "lucide-react";
+import { Loader2, FileText, Download, Printer, TrendingUp, DollarSign, FileDown, CalendarDays } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subDays } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -284,7 +284,7 @@ export default function ReportsPage() {
             <p className="text-muted-foreground mt-1">View sales reports and generate invoices</p>
           </div>
           <Button onClick={exportReportPDF} data-testid="button-export-pdf">
-            <FilePdf className="w-4 h-4 mr-2" />
+            <FileDown className="w-4 h-4 mr-2" />
             Export PDF Report
           </Button>
         </div>

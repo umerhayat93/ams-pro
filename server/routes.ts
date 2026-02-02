@@ -200,48 +200,77 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(api.sales.create.path, async (req, res) => {
     if (!req.isAuthenticated()) return res.status(401).send("Unauthorized");
     
-    const { customerId, items } = req.body;
-    const shopId = Number(req.params.shopId);
-    
-    // Calculate totals and profits
-    let totalAmount = 0;
-    let totalProfit = 0;
-    const enrichedItems = [];
+    try {
+      const { customerId, items } = req.body;
+      const shopId = Number(req.params.shopId);
+      
+      // Validate items array
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "At least one item is required" });
+      }
+      
+      if (!customerId) {
+        return res.status(400).json({ message: "Customer is required" });
+      }
+      
+      // Calculate totals and validate stock
+      let totalAmount = 0;
+      let totalProfit = 0;
+      const enrichedItems = [];
 
-    for (const item of items) {
-      const inventoryItem = await storage.getInventoryItem(item.inventoryId);
-      if (!inventoryItem) throw new Error(`Item ${item.inventoryId} not found`);
-      
-      // Calculate
-      const unitPrice = item.unitPrice || Number(inventoryItem.sellingPrice);
-      const costPrice = Number(inventoryItem.buyingPrice);
-      const lineTotal = unitPrice * item.quantity;
-      const lineProfit = (unitPrice - costPrice) * item.quantity;
-      
-      totalAmount += lineTotal;
-      totalProfit += lineProfit;
-      
-      enrichedItems.push({
-        inventoryId: item.inventoryId,
-        quantity: item.quantity,
-        unitPrice,
-        costPrice,
-        brand: inventoryItem.brand,
-        model: inventoryItem.model,
-        variant: inventoryItem.storage + " " + inventoryItem.ram,
-      });
+      for (const item of items) {
+        const inventoryItem = await storage.getInventoryItem(item.inventoryId);
+        if (!inventoryItem) {
+          return res.status(400).json({ message: `Product not found: ${item.inventoryId}` });
+        }
+        
+        // Validate stock availability
+        if (inventoryItem.quantity < item.quantity) {
+          return res.status(400).json({ 
+            message: `Insufficient stock for ${inventoryItem.brand} ${inventoryItem.model}. Available: ${inventoryItem.quantity}, Requested: ${item.quantity}` 
+          });
+        }
+        
+        // Safely parse prices - default to 0 if NaN
+        const unitPrice = Number(item.unitPrice) || Number(inventoryItem.sellingPrice) || 0;
+        const costPrice = Number(inventoryItem.buyingPrice) || 0;
+        const quantity = Number(item.quantity) || 0;
+        
+        if (quantity <= 0) {
+          return res.status(400).json({ message: "Quantity must be greater than 0" });
+        }
+        
+        const lineTotal = unitPrice * quantity;
+        const lineProfit = (unitPrice - costPrice) * quantity;
+        
+        totalAmount += lineTotal;
+        totalProfit += lineProfit;
+        
+        enrichedItems.push({
+          inventoryId: item.inventoryId,
+          quantity,
+          unitPrice,
+          costPrice,
+          brand: inventoryItem.brand,
+          model: inventoryItem.model,
+          variant: inventoryItem.storage + " " + inventoryItem.ram,
+        });
+      }
+
+      const saleData = {
+        shopId,
+        customerId,
+        invoiceCode: "INV-" + Date.now().toString().slice(-6),
+        totalAmount: totalAmount.toString(),
+        totalProfit: totalProfit.toString(),
+      };
+
+      const sale = await storage.createSale(saleData, enrichedItems);
+      res.status(201).json(sale);
+    } catch (error: any) {
+      console.error("Sale creation error:", error);
+      res.status(500).json({ message: error.message || "Failed to create sale" });
     }
-
-    const saleData = {
-      shopId,
-      customerId,
-      invoiceCode: "INV-" + Date.now().toString().slice(-6),
-      totalAmount: totalAmount.toString(),
-      totalProfit: totalProfit.toString(),
-    };
-
-    const sale = await storage.createSale(saleData, enrichedItems);
-    res.status(201).json(sale);
   });
 
   app.get(api.sales.list.path, async (req, res) => {

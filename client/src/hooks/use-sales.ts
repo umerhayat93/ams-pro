@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildUrl, type CreateSaleRequest } from "@shared/routes";
+import { api, buildUrl } from "@shared/routes";
+import { type CreateSaleRequest } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 export function useSales(shopId: number, startDate?: string, endDate?: string) {

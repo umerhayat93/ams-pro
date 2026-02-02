@@ -1,13 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRoute } from "wouter";
 import { LayoutShell } from "@/components/layout-shell";
 import { useInventory } from "@/hooks/use-inventory";
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useCreateSale } from "@/hooks/use-sales";
-import { useCart } from "@/hooks/use-cart";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -15,96 +14,82 @@ import { Label } from "@/components/ui/label";
 import { Search, ShoppingCart, Plus, Minus, UserPlus, Check, Loader2, Package } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { type Customer, type InventoryItem } from "@shared/schema";
 
 export default function PosPage() {
   const [, params] = useRoute("/shops/:id/pos");
   const shopId = parseInt(params?.id || "0");
-  const { data: inventory, isLoading } = useInventory(shopId);
+  const { data: inventory, isLoading, refetch: refetchInventory } = useInventory(shopId);
   const { data: customers } = useCustomers(shopId);
   const { mutateAsync: createCustomer } = useCreateCustomer(shopId);
   const { mutateAsync: createSale, isPending: isProcessing } = useCreateSale(shopId);
   const { toast } = useToast();
 
-  // Use cart context
-  const { 
-    items: cartItems, 
-    customer: selectedCustomer, 
-    addToCart, 
-    removeFromCart,
-    updateQuantity: updateCartQuantity,
-    incrementQuantity,
-    decrementQuantity,
-    setCustomer: setSelectedCustomer,
-    clearCart,
-    getQuantity,
-    subtotal,
-    hasItems 
-  } = useCart();
-
   const [searchQuery, setSearchQuery] = useState("");
+  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
   const [isCustomerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerMobile, setNewCustomerMobile] = useState("");
 
-  const filteredInventory = inventory?.filter(item => 
-    item.model.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    item.brand.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredInventory = useMemo(() => 
+    inventory?.filter(item => 
+      item.model.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      item.brand.toLowerCase().includes(searchQuery.toLowerCase())
+    ) || []
+  , [inventory, searchQuery]);
 
-  const handleIncrement = (itemId: number) => {
-    const item = inventory?.find(i => i.id === itemId);
-    if (!item) return;
-    
-    const currentQty = getQuantity(itemId);
-    if (currentQty === 0) {
-      addToCart(item, 1);
-    } else {
-      const success = incrementQuantity(itemId, item.quantity);
-      if (!success) {
-        toast({ title: "Insufficient stock", variant: "destructive" });
-      }
+  const getQuantity = (itemId: number) => quantities[itemId] || 0;
+
+  const updateQuantity = (itemId: number, newQty: number, maxStock: number) => {
+    if (newQty < 0) newQty = 0;
+    if (newQty > maxStock) {
+      toast({ title: "Insufficient stock", variant: "destructive" });
+      newQty = maxStock;
     }
-  };
-
-  const handleDecrement = (itemId: number) => {
-    decrementQuantity(itemId);
-  };
-
-  const handleQuantityInput = (itemId: number, value: string) => {
-    const item = inventory?.find(i => i.id === itemId);
-    if (!item) return;
-    
-    const qty = parseInt(value) || 0;
-    const currentQty = getQuantity(itemId);
-    
-    if (qty <= 0) {
-      removeFromCart(itemId);
-    } else if (currentQty === 0 && qty > 0) {
-      addToCart(item, Math.min(qty, item.quantity));
-    } else {
-      const success = updateCartQuantity(itemId, Math.min(qty, item.quantity), item.quantity);
-      if (!success && qty > item.quantity) {
-        toast({ title: "Insufficient stock", variant: "destructive" });
+    setQuantities(prev => {
+      const updated = { ...prev };
+      if (newQty === 0) {
+        delete updated[itemId];
+      } else {
+        updated[itemId] = newQty;
       }
-    }
+      return updated;
+    });
   };
+
+  const cartItems = useMemo(() => {
+    return Object.entries(quantities)
+      .filter(([_, qty]) => qty > 0)
+      .map(([id, qty]) => {
+        const item = inventory?.find(i => i.id === parseInt(id));
+        return item ? { item, quantity: qty } : null;
+      })
+      .filter(Boolean) as { item: InventoryItem; quantity: number }[];
+  }, [quantities, inventory]);
+
+  const cartTotal = useMemo(() => 
+    cartItems.reduce((acc, { item, quantity }) => acc + (Number(item.sellingPrice) * quantity), 0)
+  , [cartItems]);
+
+  const hasItemsInCart = cartItems.length > 0;
 
   const handleCheckout = async () => {
     if (!selectedCustomer) {
       toast({ title: "Select a customer first", variant: "destructive" });
       return;
     }
-    if (!hasItems) {
-      toast({ title: "Add products to cart first", variant: "destructive" });
+    if (!hasItemsInCart) {
+      toast({ title: "Set quantity for at least one product", variant: "destructive" });
       return;
     }
 
     try {
-      const items = cartItems.map(cartItem => ({
-        inventoryId: cartItem.inventoryItem.id,
-        quantity: cartItem.quantity,
-        unitPrice: Number(cartItem.inventoryItem.sellingPrice) || 0
+      const items = cartItems.map(({ item, quantity }) => ({
+        inventoryId: item.id,
+        quantity,
+        unitPrice: Number(item.sellingPrice) || 0
       }));
 
       const result = await createSale({
@@ -113,7 +98,9 @@ export default function PosPage() {
       });
       
       if (result) {
-        clearCart();
+        setQuantities({});
+        setSelectedCustomer(null);
+        refetchInventory();
       }
     } catch (e) {
       console.error("Sale failed:", e);
@@ -162,7 +149,7 @@ export default function PosPage() {
     <LayoutShell shopId={shopId}>
       <div className="h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
         
-        {/* Left: Product List with Quantity Controls */}
+        {/* Left: ALL Inventory Products with Quantity Controls */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           <div className="flex gap-4">
             <div className="relative flex-1">
@@ -181,7 +168,7 @@ export default function PosPage() {
             <CardHeader className="py-3 px-4 border-b bg-muted/30">
               <CardTitle className="text-base flex items-center gap-2">
                 <Package className="w-4 h-4" />
-                Select Products & Quantities
+                All Products - Set Quantity to Sell
               </CardTitle>
             </CardHeader>
             <ScrollArea className="h-[calc(100%-3.5rem)]">
@@ -193,7 +180,7 @@ export default function PosPage() {
                   return (
                     <div 
                       key={item.id} 
-                      className={`p-4 flex items-center gap-4 ${isOutOfStock ? 'opacity-50 bg-muted/20' : ''} ${qty > 0 ? 'bg-primary/5' : ''}`}
+                      className={`p-4 flex items-center gap-4 transition-colors ${isOutOfStock ? 'opacity-50 bg-muted/20' : ''} ${qty > 0 ? 'bg-primary/10 border-l-4 border-l-primary' : ''}`}
                       data-testid={`product-row-${item.id}`}
                     >
                       <div className="flex-1 min-w-0">
@@ -202,6 +189,11 @@ export default function PosPage() {
                           <Badge variant={item.quantity < 5 ? "destructive" : "secondary"} className="text-[10px]">
                             Stock: {item.quantity}
                           </Badge>
+                          {qty > 0 && (
+                            <Badge variant="default" className="text-[10px] bg-green-600">
+                              Selling: {qty}
+                            </Badge>
+                          )}
                         </div>
                         <h3 className="font-semibold text-sm truncate">{item.model}</h3>
                         <p className="text-xs text-muted-foreground">{item.storage} • {item.ram} {item.color && `• ${item.color}`}</p>
@@ -209,38 +201,43 @@ export default function PosPage() {
                       
                       <div className="text-right mr-4">
                         <p className="font-bold text-primary">{formatCurrency(Number(item.sellingPrice))}</p>
+                        {qty > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            = {formatCurrency(Number(item.sellingPrice) * qty)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
                         <Button 
                           size="icon" 
-                          variant="outline" 
-                          className="h-8 w-8 rounded-full"
-                          onClick={() => handleDecrement(item.id)}
+                          variant={qty > 0 ? "default" : "outline"}
+                          className="h-9 w-9 rounded-full"
+                          onClick={() => updateQuantity(item.id, qty - 1, item.quantity)}
                           disabled={qty === 0 || isOutOfStock}
                           data-testid={`btn-decrease-${item.id}`}
                         >
-                          <Minus className="h-3 w-3" />
+                          <Minus className="h-4 w-4" />
                         </Button>
                         <Input
                           type="number"
                           min={0}
                           max={item.quantity}
                           value={qty}
-                          onChange={e => handleQuantityInput(item.id, e.target.value)}
-                          className="w-14 h-8 text-center p-1"
+                          onChange={e => updateQuantity(item.id, parseInt(e.target.value) || 0, item.quantity)}
+                          className="w-16 h-9 text-center font-bold"
                           disabled={isOutOfStock}
                           data-testid={`input-qty-${item.id}`}
                         />
                         <Button 
                           size="icon" 
-                          variant="outline" 
-                          className="h-8 w-8 rounded-full"
-                          onClick={() => handleIncrement(item.id)}
+                          variant={qty > 0 ? "default" : "outline"}
+                          className="h-9 w-9 rounded-full"
+                          onClick={() => updateQuantity(item.id, qty + 1, item.quantity)}
                           disabled={isOutOfStock || qty >= item.quantity}
                           data-testid={`btn-increase-${item.id}`}
                         >
-                          <Plus className="h-3 w-3" />
+                          <Plus className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
@@ -256,8 +253,8 @@ export default function PosPage() {
           </Card>
         </div>
 
-        {/* Right: Cart Summary & Checkout */}
-        <div className="w-full md:w-96 flex flex-col gap-4 min-h-0 bg-card border rounded-xl shadow-lg shadow-black/5 overflow-hidden">
+        {/* Right: Sale Summary & Checkout */}
+        <div className="w-full md:w-96 flex flex-col min-h-0 bg-card border rounded-xl shadow-lg shadow-black/5 overflow-hidden">
           
           {/* Customer Selection */}
           <div className="p-4 border-b bg-muted/20 space-y-3">
@@ -346,27 +343,28 @@ export default function PosPage() {
             )}
           </div>
 
-          {/* Cart Items Summary */}
+          {/* Selected Items Summary */}
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-3">
-              {cartItems.map((cartItem) => (
-                <div key={cartItem.inventoryItem.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Items to Sell:</h3>
+              {cartItems.map(({ item, quantity }) => (
+                <div key={item.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
                   <div className="flex-1">
-                    <p className="font-bold text-sm line-clamp-1">{cartItem.inventoryItem.brand} {cartItem.inventoryItem.model}</p>
-                    <p className="text-xs text-muted-foreground">{cartItem.inventoryItem.storage} × {cartItem.quantity}</p>
+                    <p className="font-bold text-sm line-clamp-1">{item.brand} {item.model}</p>
+                    <p className="text-xs text-muted-foreground">{item.storage} × {quantity} units</p>
                   </div>
                   <div className="text-right">
-                    <span className="font-bold text-sm">
-                      {formatCurrency(Number(cartItem.inventoryItem.sellingPrice) * cartItem.quantity)}
+                    <span className="font-bold text-sm text-primary">
+                      {formatCurrency(Number(item.sellingPrice) * quantity)}
                     </span>
                   </div>
                 </div>
               ))}
-              {!hasItems && (
+              {!hasItemsInCart && (
                 <div className="text-center py-8 text-muted-foreground">
                   <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-20" />
                   <p>No items selected</p>
-                  <p className="text-xs mt-1">Set quantity for products on the left</p>
+                  <p className="text-xs mt-1">Set quantity (use +/-) for products on the left</p>
                 </div>
               )}
             </div>
@@ -375,27 +373,31 @@ export default function PosPage() {
           {/* Footer Totals */}
           <div className="p-4 border-t bg-muted/10 space-y-4">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Items</span>
-              <span className="font-medium">{cartItems.length} products</span>
+              <span className="text-muted-foreground">Products Selected</span>
+              <span className="font-medium">{cartItems.length}</span>
             </div>
-            <div className="flex justify-between items-center text-xl font-bold">
-              <span>Total</span>
-              <span className="text-primary">{formatCurrency(subtotal)}</span>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Total Units</span>
+              <span className="font-medium">{cartItems.reduce((sum, c) => sum + c.quantity, 0)}</span>
             </div>
-            {!selectedCustomer && hasItems && (
+            <div className="flex justify-between items-center text-xl font-bold border-t pt-3">
+              <span>Grand Total</span>
+              <span className="text-primary">{formatCurrency(cartTotal)}</span>
+            </div>
+            {!selectedCustomer && hasItemsInCart && (
               <p className="text-sm text-amber-600 text-center">Select a customer to complete sale</p>
             )}
-            {selectedCustomer && !hasItems && (
+            {selectedCustomer && !hasItemsInCart && (
               <p className="text-sm text-amber-600 text-center">Set product quantities to complete sale</p>
             )}
             <Button 
               className="w-full h-12 text-lg font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all" 
               onClick={handleCheckout}
-              disabled={isProcessing || !hasItems || !selectedCustomer}
+              disabled={isProcessing || !hasItemsInCart || !selectedCustomer}
               data-testid="btn-complete-sale"
             >
               {isProcessing && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              {!hasItems ? "Select Products" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
+              {!hasItemsInCart ? "Select Products" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
             </Button>
           </div>
         </div>

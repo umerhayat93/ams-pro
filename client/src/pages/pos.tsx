@@ -4,6 +4,7 @@ import { LayoutShell } from "@/components/layout-shell";
 import { useInventory } from "@/hooks/use-inventory";
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useCreateSale } from "@/hooks/use-sales";
+import { useCart } from "@/hooks/use-cart";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,12 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Search, ShoppingCart, Plus, Minus, UserPlus, Check, Loader2, Package } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { type InventoryItem, type Customer } from "@shared/schema";
-
-interface CartItem {
-  inventoryItem: InventoryItem;
-  quantity: number;
-}
 
 export default function PosPage() {
   const [, params] = useRoute("/shops/:id/pos");
@@ -30,9 +25,23 @@ export default function PosPage() {
   const { mutateAsync: createSale, isPending: isProcessing } = useCreateSale(shopId);
   const { toast } = useToast();
 
+  // Use cart context
+  const { 
+    items: cartItems, 
+    customer: selectedCustomer, 
+    addToCart, 
+    removeFromCart,
+    updateQuantity: updateCartQuantity,
+    incrementQuantity,
+    decrementQuantity,
+    setCustomer: setSelectedCustomer,
+    clearCart,
+    getQuantity,
+    subtotal,
+    hasItems 
+  } = useCart();
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [cart, setCart] = useState<Map<number, number>>(new Map());
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
   const [isCustomerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
@@ -43,64 +52,60 @@ export default function PosPage() {
     item.brand.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
-  const getQuantity = (itemId: number) => cart.get(itemId) || 0;
-
-  const updateQuantity = (itemId: number, delta: number, maxStock: number) => {
-    setCart(prev => {
-      const newCart = new Map(prev);
-      const currentQty = newCart.get(itemId) || 0;
-      const newQty = currentQty + delta;
-      
-      if (newQty <= 0) {
-        newCart.delete(itemId);
-      } else if (newQty > maxStock) {
+  const handleIncrement = (itemId: number) => {
+    const item = inventory?.find(i => i.id === itemId);
+    if (!item) return;
+    
+    const currentQty = getQuantity(itemId);
+    if (currentQty === 0) {
+      addToCart(item, 1);
+    } else {
+      const success = incrementQuantity(itemId, item.quantity);
+      if (!success) {
         toast({ title: "Insufficient stock", variant: "destructive" });
-        return prev;
-      } else {
-        newCart.set(itemId, newQty);
       }
-      return newCart;
-    });
+    }
   };
 
-  const setQuantityDirect = (itemId: number, qty: number, maxStock: number) => {
-    setCart(prev => {
-      const newCart = new Map(prev);
-      if (qty <= 0) {
-        newCart.delete(itemId);
-      } else if (qty > maxStock) {
-        toast({ title: "Insufficient stock", variant: "destructive" });
-        newCart.set(itemId, maxStock);
-      } else {
-        newCart.set(itemId, qty);
-      }
-      return newCart;
-    });
+  const handleDecrement = (itemId: number) => {
+    decrementQuantity(itemId);
   };
 
-  const cartItems = inventory?.filter(item => cart.has(item.id)) || [];
-  const cartTotal = cartItems.reduce((acc, item) => acc + (Number(item.sellingPrice) * (cart.get(item.id) || 0)), 0);
-  const hasItemsInCart = cart.size > 0;
+  const handleQuantityInput = (itemId: number, value: string) => {
+    const item = inventory?.find(i => i.id === itemId);
+    if (!item) return;
+    
+    const qty = parseInt(value) || 0;
+    const currentQty = getQuantity(itemId);
+    
+    if (qty <= 0) {
+      removeFromCart(itemId);
+    } else if (currentQty === 0 && qty > 0) {
+      addToCart(item, Math.min(qty, item.quantity));
+    } else {
+      const success = updateCartQuantity(itemId, Math.min(qty, item.quantity), item.quantity);
+      if (!success && qty > item.quantity) {
+        toast({ title: "Insufficient stock", variant: "destructive" });
+      }
+    }
+  };
 
   const handleCheckout = async () => {
     if (!selectedCustomer) {
       toast({ title: "Select a customer first", variant: "destructive" });
       return;
     }
-    if (!hasItemsInCart) {
+    if (!hasItems) {
       toast({ title: "Add products to cart first", variant: "destructive" });
       return;
     }
 
     try {
-      const items = Array.from(cart.entries()).map(([inventoryId, quantity]) => {
-        const item = inventory?.find(i => i.id === inventoryId);
-        return {
-          inventoryId,
-          quantity,
-          unitPrice: Number(item?.sellingPrice || 0)
-        };
-      });
+      const items = cartItems.map(cartItem => ({
+        inventoryId: cartItem.inventoryItem.id,
+        quantity: cartItem.quantity,
+        unitPrice: Number(cartItem.inventoryItem.sellingPrice) || 0
+      }));
 
       const result = await createSale({
         customerId: selectedCustomer.id,
@@ -108,8 +113,7 @@ export default function PosPage() {
       });
       
       if (result) {
-        setCart(new Map());
-        setSelectedCustomer(null);
+        clearCart();
       }
     } catch (e) {
       console.error("Sale failed:", e);
@@ -138,6 +142,11 @@ export default function PosPage() {
       console.error("Failed to create customer:", e);
     }
   };
+
+  const filteredCustomers = customers?.filter(c => 
+    c.name.toLowerCase().includes(customerSearch.toLowerCase()) || 
+    c.mobile.includes(customerSearch)
+  ) || [];
 
   if (isLoading) {
     return (
@@ -207,7 +216,7 @@ export default function PosPage() {
                           size="icon" 
                           variant="outline" 
                           className="h-8 w-8 rounded-full"
-                          onClick={() => updateQuantity(item.id, -1, item.quantity)}
+                          onClick={() => handleDecrement(item.id)}
                           disabled={qty === 0 || isOutOfStock}
                           data-testid={`btn-decrease-${item.id}`}
                         >
@@ -218,7 +227,7 @@ export default function PosPage() {
                           min={0}
                           max={item.quantity}
                           value={qty}
-                          onChange={e => setQuantityDirect(item.id, parseInt(e.target.value) || 0, item.quantity)}
+                          onChange={e => handleQuantityInput(item.id, e.target.value)}
                           className="w-14 h-8 text-center p-1"
                           disabled={isOutOfStock}
                           data-testid={`input-qty-${item.id}`}
@@ -227,7 +236,7 @@ export default function PosPage() {
                           size="icon" 
                           variant="outline" 
                           className="h-8 w-8 rounded-full"
-                          onClick={() => updateQuantity(item.id, 1, item.quantity)}
+                          onClick={() => handleIncrement(item.id)}
                           disabled={isOutOfStock || qty >= item.quantity}
                           data-testid={`btn-increase-${item.id}`}
                         >
@@ -277,7 +286,7 @@ export default function PosPage() {
                     />
                     {customerSearch && (
                       <div className="absolute top-full left-0 right-0 bg-popover border shadow-lg rounded-md mt-1 max-h-40 overflow-auto z-50">
-                        {customers?.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.mobile.includes(customerSearch)).map(c => (
+                        {filteredCustomers.map(c => (
                           <div 
                             key={c.id} 
                             className="p-2 hover:bg-muted text-sm cursor-pointer"
@@ -291,7 +300,7 @@ export default function PosPage() {
                             <p className="text-xs text-muted-foreground">{c.mobile}</p>
                           </div>
                         ))}
-                        {customers?.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.mobile.includes(customerSearch)).length === 0 && (
+                        {filteredCustomers.length === 0 && (
                           <div className="p-2 text-sm text-muted-foreground">No customers found</div>
                         )}
                       </div>
@@ -340,23 +349,20 @@ export default function PosPage() {
           {/* Cart Items Summary */}
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-3">
-              {cartItems.map((item) => {
-                const qty = cart.get(item.id) || 0;
-                return (
-                  <div key={item.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
-                    <div className="flex-1">
-                      <p className="font-bold text-sm line-clamp-1">{item.brand} {item.model}</p>
-                      <p className="text-xs text-muted-foreground">{item.storage} × {qty}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-bold text-sm">
-                        {formatCurrency(Number(item.sellingPrice) * qty)}
-                      </span>
-                    </div>
+              {cartItems.map((cartItem) => (
+                <div key={cartItem.inventoryItem.id} className="flex gap-3 bg-muted/30 p-3 rounded-lg border border-border/50">
+                  <div className="flex-1">
+                    <p className="font-bold text-sm line-clamp-1">{cartItem.inventoryItem.brand} {cartItem.inventoryItem.model}</p>
+                    <p className="text-xs text-muted-foreground">{cartItem.inventoryItem.storage} × {cartItem.quantity}</p>
                   </div>
-                );
-              })}
-              {!hasItemsInCart && (
+                  <div className="text-right">
+                    <span className="font-bold text-sm">
+                      {formatCurrency(Number(cartItem.inventoryItem.sellingPrice) * cartItem.quantity)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {!hasItems && (
                 <div className="text-center py-8 text-muted-foreground">
                   <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-20" />
                   <p>No items selected</p>
@@ -370,26 +376,26 @@ export default function PosPage() {
           <div className="p-4 border-t bg-muted/10 space-y-4">
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">Items</span>
-              <span className="font-medium">{cart.size} products</span>
+              <span className="font-medium">{cartItems.length} products</span>
             </div>
             <div className="flex justify-between items-center text-xl font-bold">
               <span>Total</span>
-              <span className="text-primary">{formatCurrency(cartTotal)}</span>
+              <span className="text-primary">{formatCurrency(subtotal)}</span>
             </div>
-            {!selectedCustomer && hasItemsInCart && (
+            {!selectedCustomer && hasItems && (
               <p className="text-sm text-amber-600 text-center">Select a customer to complete sale</p>
             )}
-            {selectedCustomer && !hasItemsInCart && (
+            {selectedCustomer && !hasItems && (
               <p className="text-sm text-amber-600 text-center">Set product quantities to complete sale</p>
             )}
             <Button 
               className="w-full h-12 text-lg font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all" 
               onClick={handleCheckout}
-              disabled={isProcessing || !hasItemsInCart || !selectedCustomer}
+              disabled={isProcessing || !hasItems || !selectedCustomer}
               data-testid="btn-complete-sale"
             >
               {isProcessing && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              {!hasItemsInCart ? "Select Products" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
+              {!hasItems ? "Select Products" : !selectedCustomer ? "Select Customer" : "Complete Sale"}
             </Button>
           </div>
         </div>

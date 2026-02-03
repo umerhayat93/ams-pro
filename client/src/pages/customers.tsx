@@ -199,6 +199,7 @@ export default function CustomersPage() {
             </div>
           )}
         </div>
+      </div>
 
         <CustomerDetailsDialog
           open={detailOpen}

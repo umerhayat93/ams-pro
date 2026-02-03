@@ -29,15 +29,38 @@ export async function setupAuth(app: Express) {
   const mod = await import("connect-pg-simple");
   const connectPgSimple = (mod && (mod.default || mod)) as any;
 
+  const createTableIfMissing = true;
+
+  // create the store instance but avoid letting the library try to read a
+  // packaged table.sql file (which isn't available after bundling). We'll
+  // create the table manually using the app's `pool` which is SSL-configured.
+  const StoreConstructor = connectPgSimple(session);
+  const storeInstance = new StoreConstructor({ pool, createTableIfMissing: false });
+
+  if (createTableIfMissing) {
+    // create the sessions table in a safe idempotent way
+    const tableName = process.env.SESSION_TABLE_NAME || 'session';
+    const createSql = `
+      CREATE TABLE IF NOT EXISTS "${tableName}" (
+        sid varchar PRIMARY KEY NOT NULL,
+        sess json NOT NULL,
+        expire timestamp(6) NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS "IDX_${tableName}_expire" ON "${tableName}" ("expire");
+    `;
+    try {
+      await pool.query(createSql);
+    } catch (err) {
+      console.error('Failed to ensure session table exists:', err);
+      throw err;
+    }
+  }
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "r3pl1t_sup3r_s3cr3t_k3y",
     resave: false,
     saveUninitialized: false,
-    // Ensure the session store uses the same pool (with SSL) as the app
-    store: new (connectPgSimple(session))({
-      pool,
-      createTableIfMissing: true,
-    }),
+    store: storeInstance,
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },

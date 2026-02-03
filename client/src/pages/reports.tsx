@@ -107,30 +107,40 @@ export default function ReportsPage() {
 
       const last = (doc as any).lastAutoTable || {};
       const finalY = last.finalY || cursorY + 10;
-      const columns = (last.table && last.table.columns) || [];
-      const lastCol = columns[columns.length - 1];
-      const totalColRight = lastCol ? (lastCol.x + lastCol.width) : ((last.table && (last.table.x + last.table.width)) || (pageWidth - 14));
+      const cols = (last.table && last.table.columns && last.table.columns.length) || itemHead[0].length || 1;
 
-      // Ensure there's room for totals; if not, add a page
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const neededSpace = canSeeProfit ? 28 : 18;
-      let totalsY = finalY + 8;
-      if (totalsY + neededSpace > pageHeight - 20) {
-        doc.addPage();
-        totalsY = 22;
-      }
+      // Build a totals row with empty cells except the last
+      const totalRow: any[] = new Array(cols).fill("");
+      totalRow[cols - 1] = `Total: PKR ${Number(sale.totalAmount).toLocaleString()}`;
 
-      // Invoice totals aligned to the last column (right aligned)
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(`Total: PKR ${Number(sale.totalAmount).toLocaleString()}`, totalColRight - 2, totalsY, { align: 'right' });
+      autoTable(doc, {
+        body: [totalRow],
+        startY: finalY + 6,
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 10, cellPadding: 4 },
+        theme: 'plain',
+        columnStyles: { [cols - 1]: { halign: 'right' } },
+        didDrawPage: () => {},
+      });
+
+      const afterTotals = (doc as any).lastAutoTable || {};
+      let totalsFinalY = afterTotals.finalY || finalY + 6;
+
       if (canSeeProfit && sale.totalProfit) {
-        doc.setTextColor(34, 197, 94);
-        doc.text(`Profit: PKR ${Number(sale.totalProfit).toLocaleString()}`, totalColRight - 2, totalsY + 8, { align: 'right' });
-        doc.setTextColor(0);
+        const profitRow: any[] = new Array(cols).fill("");
+        profitRow[cols - 1] = `Profit: PKR ${Number(sale.totalProfit).toLocaleString()}`;
+        autoTable(doc, {
+          body: [profitRow],
+          startY: totalsFinalY + 2,
+          margin: { left: 14, right: 14 },
+          styles: { fontSize: 10, cellPadding: 4, textColor: [34, 197, 94] },
+          theme: 'plain',
+          columnStyles: { [cols - 1]: { halign: 'right' } },
+        });
+        totalsFinalY = (doc as any).lastAutoTable.finalY || totalsFinalY + 10;
       }
 
-      cursorY = totalsY + (canSeeProfit ? 28 : 18);
+      cursorY = totalsFinalY + 12;
       // Add a small spacer between invoices and break page if needed for next invoice
       if (idx < (sales || []).length - 1 && cursorY > doc.internal.pageSize.getHeight() - 60) {
         doc.addPage();

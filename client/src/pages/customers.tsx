@@ -208,7 +208,9 @@ export default function CustomersPage() {
             </DialogHeader>
             <div className="p-4">
               {salesLoading ? (
-                <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                </div>
               ) : (
                 <div className="space-y-4">
                   {(sales || []).filter(s => s.customer?.id === selectedCustomer?.id).map((sale: any) => (

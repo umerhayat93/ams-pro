@@ -35,6 +35,28 @@ export async function setupAuth(app: Express) {
   // packaged table.sql file (which isn't available after bundling). We'll
   // create the table manually using the app's `pool` which is SSL-configured.
   const StoreConstructor = connectPgSimple(session);
+  // Override the internal table-creation method to avoid reading a packaged
+  // `table.sql` file which isn't available after bundling. Use our SSL-enabled
+  // `pool` to create the table instead.
+  const tableName = process.env.SESSION_TABLE_NAME || 'session';
+  const createSql = `
+      CREATE TABLE IF NOT EXISTS "${tableName}" (
+        sid varchar PRIMARY KEY NOT NULL,
+        sess json NOT NULL,
+        expire timestamp(6) NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS "IDX_${tableName}_expire" ON "${tableName}" ("expire");
+    `;
+
+  StoreConstructor.prototype._rawEnsureSessionStoreTable = async function () {
+    try {
+      await pool.query(createSql);
+    } catch (err) {
+      console.error('connect-pg-simple: failed to create session table via pool override', err);
+      throw err;
+    }
+  };
+
   const storeInstance = new StoreConstructor({ pool, createTableIfMissing: false });
 
   if (createTableIfMissing) {

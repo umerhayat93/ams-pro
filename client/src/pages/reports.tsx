@@ -77,14 +77,38 @@ export default function ReportsPage() {
       return row;
     }) || [];
     
+    const tableStartY = canSeeProfit ? 100 : 95;
+
     autoTable(doc, {
       head: tableHeaders,
       body: tableData,
-      startY: canSeeProfit ? 100 : 95,
+      startY: tableStartY,
       styles: { fontSize: 9 },
       headStyles: { fillColor: [59, 130, 246], textColor: 255 },
       alternateRowStyles: { fillColor: [245, 247, 250] },
+      theme: 'grid',
     });
+
+    // Draw simple side lines around the table and render total amount below
+    const lastTable: any = (doc as any).lastAutoTable || {};
+    const finalY = lastTable.finalY || tableStartY + 10;
+    const tableLeft = (lastTable.table && lastTable.table.x) || 14;
+    const tableWidth = (lastTable.table && lastTable.table.width) || (pageWidth - 28);
+    const tableRight = tableLeft + tableWidth;
+
+    // vertical side lines
+    doc.setDrawColor(150);
+    doc.setLineWidth(0.5);
+    doc.line(tableLeft, tableStartY - 6, tableLeft, finalY + 12);
+    doc.line(tableRight, tableStartY - 6, tableRight, finalY + 12);
+
+    // total calculation and print below the table (right aligned)
+    const sumAmounts = sales?.reduce((acc, s) => acc + Number(s.totalAmount || 0), 0) || 0;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`Total Amount: PKR ${sumAmounts.toLocaleString()}`, tableRight, finalY + 8, { align: "right" });
+
+    doc.save(`sales-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
     
     doc.save(`sales-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
   };

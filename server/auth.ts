@@ -7,9 +7,6 @@ import { storage } from "./storage";
 import { User } from "@shared/schema";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
 const scryptAsync = promisify(scrypt);
 
 async function hashPassword(password: string) {
@@ -25,17 +22,22 @@ async function comparePasswords(supplied: string, stored: string) {
   return timingSafeEqual(hashedPasswordBuf, suppliedPasswordBuf);
 }
 
-export function setupAuth(app: Express) {
+export async function setupAuth(app: Express) {
+  // Dynamically import connect-pg-simple so this file works when bundled
+  // to CJS (where import.meta isn't available) and also in ESM.
+  const mod = await import("connect-pg-simple");
+  const connectPgSimple = (mod && (mod.default || mod)) as any;
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "r3pl1t_sup3r_s3cr3t_k3y",
     resave: false,
     saveUninitialized: false,
-    store: new (require("connect-pg-simple")(session))({
+    store: new (connectPgSimple(session))({
       createTableIfMissing: true,
     }),
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    }
+    },
   };
 
   if (app.get("env") === "production") {

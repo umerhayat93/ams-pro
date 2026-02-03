@@ -26,7 +26,7 @@ function requireAuth() {
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // Set up Passport Auth
-  setupAuth(app);
+  await setupAuth(app);
 
   // === Admin / User Management (Superuser only) ===
   app.post(api.admin.createUser.path, requireSuperuser(), async (req, res) => {

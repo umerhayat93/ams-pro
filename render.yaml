@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: amsv3-web
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: NODE_ENV
+        sync: false

@@ -107,22 +107,31 @@ export default function ReportsPage() {
 
       const last = (doc as any).lastAutoTable || {};
       const finalY = last.finalY || cursorY + 10;
-      const tableLeft = (last.table && last.table.x) || 14;
-      const tableWidth = (last.table && last.table.width) || (pageWidth - 28);
-      const tableRight = tableLeft + tableWidth;
+      const columns = (last.table && last.table.columns) || [];
+      const lastCol = columns[columns.length - 1];
+      const totalColRight = lastCol ? (lastCol.x + lastCol.width) : ((last.table && (last.table.x + last.table.width)) || (pageWidth - 14));
 
-      // Invoice totals
+      // Ensure there's room for totals; if not, add a page
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const neededSpace = canSeeProfit ? 28 : 18;
+      let totalsY = finalY + 8;
+      if (totalsY + neededSpace > pageHeight - 20) {
+        doc.addPage();
+        totalsY = 22;
+      }
+
+      // Invoice totals aligned to the last column (right aligned)
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
-      doc.text(`Invoice Total: PKR ${Number(sale.totalAmount).toLocaleString()}`, tableRight, finalY + 8, { align: 'right' });
+      doc.text(`Total: PKR ${Number(sale.totalAmount).toLocaleString()}`, totalColRight - 2, totalsY, { align: 'right' });
       if (canSeeProfit && sale.totalProfit) {
         doc.setTextColor(34, 197, 94);
-        doc.text(`Profit: PKR ${Number(sale.totalProfit).toLocaleString()}`, tableRight, finalY + 16, { align: 'right' });
+        doc.text(`Profit: PKR ${Number(sale.totalProfit).toLocaleString()}`, totalColRight - 2, totalsY + 8, { align: 'right' });
         doc.setTextColor(0);
       }
 
-      cursorY = finalY + (canSeeProfit ? 28 : 18);
-      // Add a small spacer between invoices
+      cursorY = totalsY + (canSeeProfit ? 28 : 18);
+      // Add a small spacer between invoices and break page if needed for next invoice
       if (idx < (sales || []).length - 1 && cursorY > doc.internal.pageSize.getHeight() - 60) {
         doc.addPage();
         cursorY = 20;

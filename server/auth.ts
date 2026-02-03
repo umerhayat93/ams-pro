@@ -4,6 +4,7 @@ import { Strategy as LocalStrategy } from "passport-local";
 import { Express } from "express";
 import session from "express-session";
 import { storage } from "./storage";
+import { pool } from "./db";
 import { User } from "@shared/schema";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
@@ -32,7 +33,9 @@ export async function setupAuth(app: Express) {
     secret: process.env.SESSION_SECRET || "r3pl1t_sup3r_s3cr3t_k3y",
     resave: false,
     saveUninitialized: false,
+    // Ensure the session store uses the same pool (with SSL) as the app
     store: new (connectPgSimple(session))({
+      pool,
       createTableIfMissing: true,
     }),
     cookie: {

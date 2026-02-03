@@ -19,14 +19,19 @@ import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 
 const BRANDS = ["Apple", "Samsung", "Tecno", "Infinix", "Vivo", "Xiaomi", "Oppo", "Realme", "Other"];
-const STORAGE_OPTIONS = ["32GB", "64GB", "128GB", "256GB", "512GB", "1TB"];
+const STORAGE_OPTIONS = ["16GB", "32GB", "64GB", "128GB", "256GB", "512GB", "1TB"];
 const RAM_OPTIONS = ["2GB", "3GB", "4GB", "6GB", "8GB", "12GB", "16GB"];
+const IPHONE_MODELS = [
+  "iPhone 4", "iPhone 4s", "iPhone 5", "iPhone 5s", "iPhone 6", "iPhone 6s", "iPhone 7", "iPhone 8",
+  "iPhone X", "iPhone XR", "iPhone XS", "iPhone 11", "iPhone 12", "iPhone 13", "iPhone 14", "iPhone 15", "Custom"
+];
 
-const inventorySchema = z.object({
+  const inventorySchema = z.object({
   brand: z.string().min(1, "Brand is required"),
   model: z.string().min(1, "Model is required"),
+  customModel: z.string().optional(),
   storage: z.string().min(1, "Storage is required"),
-  ram: z.string().min(1, "RAM is required"),
+    ram: z.string().optional(),
   color: z.string().optional(),
   quantity: z.coerce.number().min(0, "Quantity must be 0 or more"),
   buyingPrice: z.coerce.number().min(0, "Buying price is required"),
@@ -59,8 +64,9 @@ export default function InventoryPage() {
     defaultValues: {
       brand: "",
       model: "",
+      customModel: "",
       storage: "",
-      ram: "",
+        ram: "",
       color: "",
       quantity: 0,
       buyingPrice: 0,
@@ -68,6 +74,10 @@ export default function InventoryPage() {
       lowStockThreshold: 5,
     },
   });
+
+  const watchedBrand = form.watch("brand");
+  const watchedModel = form.watch("model");
+  const isIphone = (watchedBrand === "Apple") || /iphone/i.test(watchedModel || "");
 
   const filteredInventory = inventory?.filter(item => {
     const matchesSearch = item.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -79,8 +89,10 @@ export default function InventoryPage() {
 
   const onSubmit = async (data: InventoryForm) => {
     try {
+      const finalModel = data.model === "Custom" ? (data.customModel || "") : data.model;
       const payload = {
         ...data,
+        model: finalModel,
         shopId,
         buyingPrice: String(data.buyingPrice),
         sellingPrice: String(data.sellingPrice),
@@ -102,9 +114,14 @@ export default function InventoryPage() {
 
   const handleEdit = (item: any) => {
     setEditingItem(item);
+    // If editing an Apple item with a non-standard model, place it into customModel
+    const isApple = item.brand === "Apple" || /iphone/i.test(item.model || "");
+    const modelValue = isApple && !IPHONE_MODELS.includes(item.model) ? "Custom" : item.model;
+    const customModel = modelValue === "Custom" ? item.model : "";
     form.reset({
       brand: item.brand,
-      model: item.model,
+      model: modelValue,
+      customModel,
       storage: item.storage,
       ram: item.ram,
       color: item.color || "",
@@ -204,13 +221,36 @@ export default function InventoryPage() {
                       control={form.control}
                       name="model"
                       render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Model</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. iPhone 13" {...field} data-testid="input-model" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
+                          <FormItem>
+                            <FormLabel>Model</FormLabel>
+                            <FormControl>
+                              {isIphone ? (
+                                <>
+                                  <Select onValueChange={(v) => {
+                                    field.onChange(v);
+                                    if (v !== "Custom") form.setValue("customModel", "");
+                                  }} value={field.value}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select iPhone model" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {IPHONE_MODELS.map(m => (
+                                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  {field.value === "Custom" && (
+                                    <div className="mt-2">
+                                      <Input placeholder="Enter custom model" value={form.getValues("customModel") || ""} onChange={(e) => form.setValue("customModel", e.target.value)} data-testid="input-custom-model" />
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <Input placeholder="e.g. Galaxy S21" {...field} data-testid="input-model" />
+                              )}
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
                       )}
                     />
                   </div>
@@ -238,28 +278,31 @@ export default function InventoryPage() {
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name="ram"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>RAM</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-ram">
-                                <SelectValue placeholder="Select RAM" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {RAM_OPTIONS.map(opt => (
-                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+
+                    {!isIphone && (
+                      <FormField
+                        control={form.control}
+                        name="ram"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>RAM</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-ram">
+                                  <SelectValue placeholder="Select RAM" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {RAM_OPTIONS.map(opt => (
+                                  <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </div>
 
                   <FormField
@@ -321,7 +364,7 @@ export default function InventoryPage() {
                         )}
                       />
                     )}
-                    <FormField
+                      <FormField
                       control={form.control}
                       name="sellingPrice"
                       render={({ field }) => (

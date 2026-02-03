@@ -35,81 +35,114 @@ export default function ReportsPage() {
   const exportReportPDF = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
-    
+
     doc.setFontSize(20);
     doc.setFont("helvetica", "bold");
     doc.text(shop?.name || "Sales Report", pageWidth / 2, 20, { align: "center" });
-    
+
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text(`${shop?.address || ""} | ${shop?.location || ""} | Phone: ${shop?.phone || ""}`, pageWidth / 2, 28, { align: "center" });
-    
+
     doc.setFontSize(12);
     doc.text(`Report Period: ${format(new Date(startDate), "PP")} - ${format(new Date(endDate), "PP")}`, 14, 42);
     doc.text(`Generated: ${format(new Date(), "PPpp")}`, 14, 50);
-    
+
+    // Summary block
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text("Summary", 14, 65);
-    
+    doc.text("Summary", 14, 62);
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
-    doc.text(`Total Sales: PKR ${totalSales.toLocaleString()}`, 14, 75);
+    doc.text(`Total Sales: PKR ${totalSales.toLocaleString()}`, 14, 72);
     if (canSeeProfit) {
-      doc.text(`Total Profit: PKR ${totalProfit.toLocaleString()}`, 14, 83);
+      doc.text(`Total Profit: PKR ${totalProfit.toLocaleString()}`, 14, 80);
     }
-    doc.text(`Total Transactions: ${totalTransactions}`, 14, canSeeProfit ? 91 : 83);
-    
-    const tableHeaders = canSeeProfit 
-      ? [["Invoice", "Customer", "Date", "Amount", "Profit"]]
-      : [["Invoice", "Customer", "Date", "Amount"]];
-    
-    const tableData = sales?.map(sale => {
-      const row = [
-        sale.invoiceCode,
-        sale.customer?.name || "Walk-in",
-        formatDate(sale.createdAt),
-        `PKR ${Number(sale.totalAmount).toLocaleString()}`
-      ];
-      if (canSeeProfit) {
-        row.push(`PKR ${Number(sale.totalProfit || 0).toLocaleString()}`);
-      }
-      return row;
-    }) || [];
-    
-    const tableStartY = canSeeProfit ? 100 : 95;
+    doc.text(`Total Transactions: ${totalTransactions}`, 14, canSeeProfit ? 88 : 80);
 
-    autoTable(doc, {
-      head: tableHeaders,
-      body: tableData,
-      startY: tableStartY,
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255 },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
-      theme: 'grid',
+    // Iterate sales and print each invoice with its items (per-invoice totals beneath)
+    let cursorY = canSeeProfit ? 98 : 92;
+
+    (sales || []).forEach((sale, idx) => {
+      // Small invoice header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Invoice: ${sale.invoiceCode}`, 14, cursorY);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`${sale.customer?.name || 'Walk-in'} — ${formatDate(sale.createdAt)}`, pageWidth - 14, cursorY, { align: 'right' });
+      cursorY += 8;
+
+      const itemHead = canSeeProfit
+        ? [["Item", "Variant", "Qty", "Price", "Cost", "Profit", "Total"]]
+        : [["Item", "Variant", "Qty", "Price", "Total"]];
+
+      const itemBody = (sale.items || []).map((it: any) => {
+        const lineTotal = Number(it.unitPrice) * it.quantity;
+        const lineProfit = (Number(it.unitPrice) - Number(it.costPrice || 0)) * it.quantity;
+        const base = [
+          `${it.brand} ${it.model}`,
+          it.variant,
+          String(it.quantity),
+          `PKR ${Number(it.unitPrice).toLocaleString()}`,
+        ];
+        if (canSeeProfit) {
+          base.push(`PKR ${Number(it.costPrice || 0).toLocaleString()}`);
+          base.push(`PKR ${lineProfit.toLocaleString()}`);
+        }
+        base.push(`PKR ${lineTotal.toLocaleString()}`);
+        return base;
+      });
+
+      autoTable(doc, {
+        head: itemHead,
+        body: itemBody,
+        startY: cursorY,
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+        theme: 'grid',
+        showHead: 'everyPage',
+      });
+
+      const last = (doc as any).lastAutoTable || {};
+      const finalY = last.finalY || cursorY + 10;
+      const tableLeft = (last.table && last.table.x) || 14;
+      const tableWidth = (last.table && last.table.width) || (pageWidth - 28);
+      const tableRight = tableLeft + tableWidth;
+
+      // Invoice totals
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Invoice Total: PKR ${Number(sale.totalAmount).toLocaleString()}`, tableRight, finalY + 8, { align: 'right' });
+      if (canSeeProfit && sale.totalProfit) {
+        doc.setTextColor(34, 197, 94);
+        doc.text(`Profit: PKR ${Number(sale.totalProfit).toLocaleString()}`, tableRight, finalY + 16, { align: 'right' });
+        doc.setTextColor(0);
+      }
+
+      cursorY = finalY + (canSeeProfit ? 28 : 18);
+      // Add a small spacer between invoices
+      if (idx < (sales || []).length - 1 && cursorY > doc.internal.pageSize.getHeight() - 60) {
+        doc.addPage();
+        cursorY = 20;
+      }
     });
 
-    // Draw simple side lines around the table and render total amount below
-    const lastTable: any = (doc as any).lastAutoTable || {};
-    const finalY = lastTable.finalY || tableStartY + 10;
-    const tableLeft = (lastTable.table && lastTable.table.x) || 14;
-    const tableWidth = (lastTable.table && lastTable.table.width) || (pageWidth - 28);
-    const tableRight = tableLeft + tableWidth;
-
-    // vertical side lines
-    doc.setDrawColor(150);
-    doc.setLineWidth(0.5);
-    doc.line(tableLeft, tableStartY - 6, tableLeft, finalY + 12);
-    doc.line(tableRight, tableStartY - 6, tableRight, finalY + 12);
-
-    // total calculation and print below the table (right aligned)
-    const sumAmounts = sales?.reduce((acc, s) => acc + Number(s.totalAmount || 0), 0) || 0;
+    // Overall totals at the end
+    const overallY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : cursorY + 10;
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("Overall Totals", 14, overallY);
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    doc.text(`Total Amount: PKR ${sumAmounts.toLocaleString()}`, tableRight, finalY + 8, { align: "right" });
+    doc.text(`Total Amount: PKR ${totalSales.toLocaleString()}`, pageWidth - 14, overallY, { align: 'right' });
+    if (canSeeProfit) {
+      doc.setTextColor(34, 197, 94);
+      doc.text(`Total Profit: PKR ${totalProfit.toLocaleString()}`, pageWidth - 14, overallY + 8, { align: 'right' });
+      doc.setTextColor(0);
+    }
 
-    doc.save(`sales-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
-    
     doc.save(`sales-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
   };
 

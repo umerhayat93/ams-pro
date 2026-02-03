@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useRoute } from "wouter";
 import { LayoutShell } from "@/components/layout-shell";
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
+import { useSales } from "@/hooks/use-sales";
+import { formatDate, formatCurrency } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +33,10 @@ export default function CustomersPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+
+  const { data: sales, isLoading: salesLoading } = useSales(shopId);
 
   const form = useForm<CustomerForm>({
     resolver: zodResolver(customerSchema),
@@ -63,6 +69,69 @@ export default function CustomersPage() {
         <div className="flex h-96 items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
+        {/* Customer Details Dialog - shows sales/deals for selected customer */}
+        <Dialog open={detailOpen} onOpenChange={(v) => { if (!v) setSelectedCustomer(null); setDetailOpen(v); }}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Customer Deals</DialogTitle>
+              <DialogDescription>
+                {selectedCustomer ? `Deals for ${selectedCustomer.name} (${selectedCustomer.mobile})` : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="p-4">
+              {salesLoading ? (
+                <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>
+              ) : (
+                <div className="space-y-4">
+                  {(sales || []).filter(s => s.customer?.id === selectedCustomer?.id).map((sale: any) => (
+                    <div key={sale.id} className="p-3 border rounded">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <div className="font-semibold">Invoice: {sale.invoiceCode}</div>
+                          <div className="text-sm text-muted-foreground">{formatDate(sale.createdAt)}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium">{formatCurrency(sale.totalAmount)}</div>
+                          {sale.totalProfit != null && <div className="text-sm text-green-600">Profit: {formatCurrency(sale.totalProfit)}</div>}
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="py-2 px-2 text-left">Item</th>
+                              <th className="py-2 px-2 text-left">Variant</th>
+                              <th className="py-2 px-2 text-center">Qty</th>
+                              <th className="py-2 px-2 text-right">Price</th>
+                              <th className="py-2 px-2 text-right">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sale.items?.map((it: any, i: number) => (
+                              <tr key={i} className="border-b">
+                                <td className="py-2 px-2">{it.brand} {it.model}</td>
+                                <td className="py-2 px-2 text-muted-foreground">{it.variant}</td>
+                                <td className="py-2 px-2 text-center">{it.quantity}</td>
+                                <td className="py-2 px-2 text-right">{formatCurrency(it.unitPrice)}</td>
+                                <td className="py-2 px-2 text-right">{formatCurrency(Number(it.unitPrice) * it.quantity)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  {(sales || []).filter(s => s.customer?.id === selectedCustomer?.id).length === 0 && (
+                    <div className="py-6 text-center text-muted-foreground">No deals found for this customer.</div>
+                  )}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button onClick={() => { setDetailOpen(false); setSelectedCustomer(null); }}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </LayoutShell>
     );
   }
@@ -161,7 +230,7 @@ export default function CustomersPage() {
         {/* Customers Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredCustomers.map((customer) => (
-            <Card key={customer.id} className="hover-elevate cursor-pointer" data-testid={`card-customer-${customer.id}`}>
+            <Card key={customer.id} className="hover-elevate cursor-pointer" data-testid={`card-customer-${customer.id}`} onClick={() => { setSelectedCustomer(customer); setDetailOpen(true); }}>
               <CardContent className="pt-6">
                 <div className="flex items-start gap-4">
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">

@@ -10,7 +10,7 @@ const { Pool } = pg;
 // setting `DATABASE_URL` in your Render environment variables instead.
 const FALLBACK_DATABASE_URL =
   process.env.FALLBACK_DATABASE_URL ||
-  "postgresql://amsdata_user:Obn04Jo2LsUYbXc6Vup1AqhW5LBhFdGT@dpg-d60bjv2qcgvc73abtto0-a.virginia-postgres.render.com/amsdata";
+  "postgresql://ams_database_y96l_user:KJWgqj4yPwWMF9QqmMaVkFlpQGFq2aCS@dpg-d76he17fte5s73ejvsdg-a/ams_database_y96l";
 
 const connectionString = process.env.DATABASE_URL || FALLBACK_DATABASE_URL;
 
